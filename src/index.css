@@ -1,0 +1,88 @@
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700;900&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+@import "tailwindcss";
+
+@font-face {
+  font-family: 'SanJiBoYaSong';
+  src: url('https://cdn.jsdelivr.net/gh/crake7even/ZiTi@main/SanJiBoYaSongJianTi-Cu-2.ttf') format('truetype');
+  font-weight: normal;
+  font-style: normal;
+}
+
+@theme {
+  --font-sans: "Noto Sans SC", "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-serif: "SanJiBoYaSong", "Noto Serif SC", ui-serif, serif;
+  --font-mono: "JetBrains Mono", "Noto Sans SC", ui-monospace, SFMono-Regular, monospace;
+  
+  --color-brand-bronze: #845A38;
+  --color-brand-coral: #E2725B;
+  --color-brand-bronze-dark: #2F1E14;
+}
+
+/* Glassmorphism custom components */
+.glass-panel {
+  background: rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(20px) saturate(110%);
+  -webkit-backdrop-filter: blur(20px) saturate(110%);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.08), inset 1px 1px 1.5px 0 rgba(255, 255, 255, 0.4);
+}
+
+.glass-panel-heavy {
+  background: rgba(255, 255, 255, 0.18);
+  backdrop-filter: blur(28px) saturate(130%);
+  -webkit-backdrop-filter: blur(28px) saturate(130%);
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  box-shadow: 0 12px 40px 0 rgba(0, 0, 0, 0.12), inset 1px 1px 2px 0 rgba(255, 255, 255, 0.5);
+}
+
+.glass-card {
+  background: rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  box-shadow: 0 4px 16px 0 rgba(0, 0, 0, 0.05), inset 1px 1px 1px 0 rgba(255, 255, 255, 0.3);
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.glass-card:hover {
+  background: rgba(255, 255, 255, 0.16);
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  box-shadow: 0 12px 32px 0 rgba(0, 0, 0, 0.15), inset 1.5px 1.5px 1.5px 0 rgba(255, 255, 255, 0.5);
+}
+
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+.scrollbar-none {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Cinematic glowing backlights */
+.glow-ambient {
+  box-shadow: 0 0 100px 30px rgba(132, 90, 56, 0.15);
+}
+
+.glow-coral {
+  box-shadow: 0 0 80px 20px rgba(226, 114, 91, 0.15);
+}
+
+/* Soft ambient animation background */
+@keyframes slow-pulse {
+  0%, 100% {
+    transform: scale(1) translate(0px, 0px);
+    opacity: 0.3;
+  }
+  33% {
+    transform: scale(1.1) translate(30px, -50px);
+    opacity: 0.4;
+  }
+  66% {
+    transform: scale(0.95) translate(-20px, 40px);
+    opacity: 0.25;
+  }
+}
+
+.animate-pulse-slow {
+  animation: slow-pulse 15s infinite ease-in-out;
+}

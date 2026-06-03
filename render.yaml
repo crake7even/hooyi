@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: hooyi-api
+    runtime: node
+    plan: free
+    buildCommand: npm install && npm run build:server
+    startCommand: npm run start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: 22
+      - key: TMDB_WATCH_REGIONS
+        value: CN,US
+      - key: DEEPSEEK_MODEL
+        value: deepseek-chat
+      - key: CORS_ORIGINS
+        sync: false
+      - key: TMDB_READ_TOKEN
+        sync: false
+      - key: TMDB_API_KEY
+        sync: false
+      - key: DEEPSEEK_API_KEY
+        sync: false
+      - key: API_PROXY_URL
+        sync: false
