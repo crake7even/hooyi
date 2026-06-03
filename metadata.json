@@ -1,0 +1,6 @@
+{
+  "name": "好影 Hooyi",
+  "description": "A high-fidelity glassmorphism movie screening and discovery platform with elegant interactive layout, rich database, multi-dimensional filters, and immersive trailer playback.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["SERVER_SIDE_TMDB_API", "SERVER_SIDE_DEEPSEEK_API"]
+}

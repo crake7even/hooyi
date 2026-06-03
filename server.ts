@@ -1,0 +1,616 @@
+import express from "express";
+import dotenv from "dotenv";
+import path from "node:path";
+import { ProxyAgent, setGlobalDispatcher } from "undici";
+
+dotenv.config({ path: path.resolve(process.cwd(), ".env.local") });
+dotenv.config();
+
+type WatchPlatformType =
+  | "netflix"
+  | "prime"
+  | "disney"
+  | "apple"
+  | "hbo"
+  | "hulu"
+  | "theaters"
+  | "crunchyroll"
+  | "paramount";
+
+interface Movie {
+  id: string;
+  title: string;
+  year: number;
+  genres: string[];
+  rating: number;
+  duration: string;
+  director: string;
+  cast: string[];
+  synopsis: string;
+  posterUrl: string;
+  backdropUrl: string;
+  trailerUrl: string;
+  trending: boolean;
+  language: string;
+  maturityRating: string;
+  likesCount: string;
+  platforms?: Array<{
+    name: string;
+    type: WatchPlatformType;
+    priceInfo?: string;
+  }>;
+}
+
+interface TmdbMovieSummary {
+  id: number;
+  title?: string;
+  name?: string;
+  overview?: string;
+  poster_path?: string | null;
+  backdrop_path?: string | null;
+  release_date?: string;
+  first_air_date?: string;
+  vote_average?: number;
+  vote_count?: number;
+  original_language?: string;
+  genre_ids?: number[];
+  adult?: boolean;
+}
+
+interface CacheItem<T> {
+  expiresAt: number;
+  value: T;
+}
+
+interface VibeRecommendation {
+  rank: number;
+  movieId: string;
+  title: string;
+  match: number;
+  reason: string;
+  feeling: string;
+}
+
+interface VibeResult {
+  need: string;
+  recommendations: VibeRecommendation[];
+  tonightPick: {
+    movieId: string;
+    title: string;
+    reason: string;
+  };
+}
+
+const app = express();
+const port = Number(process.env.PORT || 3001);
+const tmdbBaseUrl = "https://api.themoviedb.org/3";
+const tmdbImageBaseUrl = "https://image.tmdb.org/t/p";
+const tmdbReadToken = process.env.TMDB_READ_TOKEN;
+const deepseekApiKey = process.env.DEEPSEEK_API_KEY;
+const deepseekModel = process.env.DEEPSEEK_MODEL || "deepseek-chat";
+const watchRegions = (process.env.TMDB_WATCH_REGIONS || process.env.TMDB_WATCH_REGION || "CN,US")
+  .split(",")
+  .map((region) => region.trim().toUpperCase())
+  .filter(Boolean);
+const apiProxyUrl = process.env.API_PROXY_URL || process.env.HTTPS_PROXY || process.env.HTTP_PROXY;
+const cache = new Map<string, CacheItem<unknown>>();
+const allowedOrigins = (process.env.CORS_ORIGINS || process.env.CORS_ORIGIN || "http://localhost:3000")
+  .split(",")
+  .map((origin) => origin.trim().replace(/\/$/, ""))
+  .filter(Boolean);
+
+const vibeSystemPrompt = `
+# 影视推荐专家
+
+你是一位顶级影视推荐顾问、资深影评人、观众心理分析师。
+
+你的任务是根据用户描述的心情、状态、处境、最近经历、想获得的感受、当前需求，分析其真正的观影诉求，并直接推荐最适合的影视作品。
+
+# 核心原则
+
+你的目标不是推荐高分作品。
+
+你的目标是：推荐此时此刻最适合用户观看的作品。
+
+优先考虑：用户情绪状态、用户心理需求、用户当前人生阶段、用户想获得的感受。
+
+不要优先考虑：豆瓣评分、IMDb评分、热门榜单、流量热度。
+
+# 用户输入
+
+用户会自由描述，例如：最近工作压力特别大、刚失恋、最近很迷茫、想看点爽的、什么都不想干、想找回对生活的热情、想找一部能让我哭出来的电影、最近总觉得孤独、想看点特别上头的剧。
+
+你需要自动理解真实需求。不要要求用户按照固定格式填写。
+
+# 需求分析规则
+
+在内部分析用户真正需要什么。不要展示分析过程。直接输出结果。
+
+示例：压力大 -> 放松、治愈、释放；孤独 -> 陪伴、共鸣；失恋 -> 疗愈、重建；迷茫 -> 找方向、寻找意义；焦虑 -> 安抚情绪；想爽 -> 强刺激、高节奏；想哭 -> 情绪释放；想热血 -> 激励、成长；无聊 -> 高沉浸感、高娱乐性。
+
+# 电影与电视剧判断规则
+
+如果用户明确提到推荐电影、想看电影、有没有电影推荐，只能推荐电影。
+
+如果用户明确提到推荐电视剧、推荐剧、最近追什么剧，只能推荐电视剧。
+
+如果用户没有明确说明，自动判断：需要快速获得情绪体验 -> 电影；需要长期沉浸陪伴 -> 电视剧。
+
+# 推荐规则
+
+必须推荐 4 部作品，不能多于 4 部，不能少于 4 部。
+
+第一部：最符合用户当前状态。
+第二部：满足同样需求，但更轻松、更容易观看。
+第三部：满足同样需求，但更深刻、更有后劲。
+第四部：意料之外，但极其契合用户状态。
+
+# 推荐质量要求
+
+不要机械推荐热门作品。不要只推荐榜单作品。
+
+不要总是出现：肖申克的救赎、阿甘正传、星际穿越、绝命毒师、权力的游戏，除非它们真的最符合用户状态。
+
+优先考虑：情绪价值、陪伴感、共鸣感、观影体验。
+
+# 输出要求
+
+只返回 JSON，不要 Markdown，不要额外解释。
+
+必须只从用户消息里提供的 movies 数组中选择作品。每一条推荐的 movieId 必须等于 movies 中已有的 id，title 必须使用对应 movies 项的 title。不要推荐 movies 数组外的作品。
+
+JSON 结构必须是：
+{
+  "need": "一句话总结用户当前最真实的观影需求",
+  "recommendations": [
+    {
+      "rank": 1,
+      "movieId": "movies 中对应作品的 id",
+      "title": "作品名称",
+      "match": 96,
+      "reason": "重点说明为什么适合用户当前状态，不复制剧情简介，不剧透",
+      "feeling": "观看后的情绪体验"
+    }
+  ],
+  "tonightPick": {
+    "movieId": "四部推荐中最适合今晚看的作品 id",
+    "title": "作品名称",
+    "reason": "一句话说明为什么它最适合用户当前状态"
+  }
+}
+
+额外要求：不要询问用户更多问题；不要要求补充信息；自动推断合理需求；直接给出推荐结果；推荐理由必须结合用户状态；不允许复制剧情简介；不允许长篇剧透；输出语言使用自然、专业、有人味的中文。
+`;
+
+if (apiProxyUrl) {
+  setGlobalDispatcher(new ProxyAgent(apiProxyUrl));
+}
+
+const fallbackVideos = [
+  "https://assets.mixkit.co/videos/preview/mixkit-futuristic-subway-station-with-neon-lights-43959-large.mp4",
+  "https://assets.mixkit.co/videos/preview/mixkit-neon-light-from-a-tunnel-with-movement-41712-large.mp4",
+  "https://assets.mixkit.co/videos/preview/mixkit-thick-fog-moving-through-forest-trees-42289-large.mp4",
+  "https://assets.mixkit.co/videos/preview/mixkit-animation-style-of-sparks-of-light-on-a-black-background-48866-large.mp4",
+];
+
+const fallbackPosters = [
+  "https://images.unsplash.com/photo-1440404653325-ab127d49abc1?w=600&auto=format&fit=crop&q=80",
+  "https://images.unsplash.com/photo-1485846234645-a62644f84728?w=600&auto=format&fit=crop&q=80",
+  "https://images.unsplash.com/photo-1524985069026-dd778a71c7b4?w=600&auto=format&fit=crop&q=80",
+];
+
+const fallbackBackdrops = [
+  "https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=1200&auto=format&fit=crop&q=80",
+  "https://images.unsplash.com/photo-1517602302552-471fe67acf66?w=1200&auto=format&fit=crop&q=80",
+  "https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=1200&auto=format&fit=crop&q=80",
+];
+
+const providerTypeByName: Array<[RegExp, WatchPlatformType]> = [
+  [/netflix/i, "netflix"],
+  [/prime|amazon/i, "prime"],
+  [/disney/i, "disney"],
+  [/apple/i, "apple"],
+  [/max|hbo/i, "hbo"],
+  [/hulu/i, "hulu"],
+  [/crunchyroll/i, "crunchyroll"],
+  [/paramount/i, "paramount"],
+];
+
+app.use(express.json({ limit: "1mb" }));
+app.use((req, res, next) => {
+  const requestOrigin = req.headers.origin?.replace(/\/$/, "");
+  const allowOrigin = requestOrigin && allowedOrigins.includes(requestOrigin)
+    ? requestOrigin
+    : allowedOrigins[0];
+
+  res.setHeader("Access-Control-Allow-Origin", allowOrigin);
+  res.setHeader("Vary", "Origin");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+
+  if (req.method === "OPTIONS") {
+    res.sendStatus(204);
+    return;
+  }
+
+  next();
+});
+
+function getCached<T>(key: string): T | null {
+  const cached = cache.get(key) as CacheItem<T> | undefined;
+  if (!cached || cached.expiresAt < Date.now()) {
+    cache.delete(key);
+    return null;
+  }
+
+  return cached.value;
+}
+
+function setCached<T>(key: string, value: T, ttlMs: number) {
+  cache.set(key, {
+    expiresAt: Date.now() + ttlMs,
+    value,
+  });
+}
+
+async function tmdbFetch<T>(endpoint: string): Promise<T> {
+  if (!tmdbReadToken) {
+    throw new Error("TMDB_READ_TOKEN is not configured");
+  }
+
+  const response = await fetch(`${tmdbBaseUrl}${endpoint}`, {
+    headers: {
+      Authorization: `Bearer ${tmdbReadToken}`,
+      accept: "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`TMDB request failed: ${response.status}`);
+  }
+
+  return response.json() as Promise<T>;
+}
+
+async function getGenreMap(): Promise<Record<number, string>> {
+  const cached = getCached<Record<number, string>>("tmdb:genre-map");
+  if (cached) return cached;
+
+  const data = await tmdbFetch<{ genres: Array<{ id: number; name: string }> }>("/genre/movie/list?language=zh-CN");
+  const genreMap = Object.fromEntries(data.genres.map((genre) => [genre.id, genre.name]));
+  setCached("tmdb:genre-map", genreMap, 24 * 60 * 60 * 1000);
+  return genreMap;
+}
+
+function imageUrl(pathValue: string | null | undefined, size: "w500" | "w780" | "w1280", fallback: string) {
+  return pathValue ? `${tmdbImageBaseUrl}/${size}${pathValue}` : fallback;
+}
+
+function fallbackById(values: string[], id: number) {
+  return values[Math.abs(id) % values.length];
+}
+
+function formatDuration(runtime?: number) {
+  if (!runtime || runtime <= 0) return "时长待更新";
+  const hours = Math.floor(runtime / 60);
+  const minutes = runtime % 60;
+  if (!hours) return `${minutes}分钟`;
+  return `${hours}小时 ${minutes}分钟`;
+}
+
+function formatLikes(voteCount?: number) {
+  if (!voteCount || voteCount <= 0) return "0";
+  if (voteCount >= 10000) return `${(voteCount / 10000).toFixed(1)}万`;
+  if (voteCount >= 1000) return `${(voteCount / 1000).toFixed(1)}K`;
+  return String(voteCount);
+}
+
+function providerType(name: string): WatchPlatformType {
+  return providerTypeByName.find(([pattern]) => pattern.test(name))?.[1] || "theaters";
+}
+
+function getRegionProviders(providerData: any) {
+  for (const region of watchRegions) {
+    const regionData = providerData?.results?.[region];
+    const hasProviders = Boolean(
+      regionData?.flatrate?.length ||
+      regionData?.rent?.length ||
+      regionData?.buy?.length,
+    );
+
+    if (hasProviders) {
+      return { region, regionData };
+    }
+  }
+
+  return { region: watchRegions[0] || "CN", regionData: null };
+}
+
+function normalizeProviders(providerData: any): Movie["platforms"] {
+  const { region, regionData } = getRegionProviders(providerData);
+  if (!regionData) return [];
+
+  const groups = [
+    { key: "flatrate", label: "订阅可看" },
+    { key: "rent", label: "租赁" },
+    { key: "buy", label: "购买" },
+  ];
+  const seen = new Set<string>();
+  const platforms: Movie["platforms"] = [];
+
+  for (const group of groups) {
+    for (const provider of regionData[group.key] || []) {
+      if (!provider?.provider_name || seen.has(provider.provider_name)) continue;
+      seen.add(provider.provider_name);
+      platforms.push({
+        name: provider.provider_name,
+        type: providerType(provider.provider_name),
+        priceInfo: `${region} ${group.label}`,
+      });
+    }
+  }
+
+  return platforms.slice(0, 5);
+}
+
+async function enrichMovie(summary: TmdbMovieSummary, genreMap: Record<number, string>, trendingIds: Set<number>): Promise<Movie> {
+  let details: any = null;
+
+  try {
+    details = await tmdbFetch<any>(
+      `/movie/${summary.id}?language=zh-CN&append_to_response=credits,watch/providers`,
+    );
+  } catch {
+    details = {};
+  }
+
+  const crew = details.credits?.crew || [];
+  const cast = details.credits?.cast || [];
+  const director = crew.find((person: any) => person.job === "Director")?.name || "导演待更新";
+  const year = Number((summary.release_date || details.release_date || "").slice(0, 4)) || new Date().getFullYear();
+  const rating = Number((summary.vote_average || details.vote_average || 0).toFixed(1));
+
+  return {
+    id: String(summary.id),
+    title: summary.title || details.title || "未命名电影",
+    year,
+    genres: (summary.genre_ids || details.genres?.map((genre: any) => genre.id) || [])
+      .map((id: number) => genreMap[id])
+      .filter(Boolean)
+      .slice(0, 4),
+    rating,
+    duration: formatDuration(details.runtime),
+    director,
+    cast: cast.slice(0, 4).map((person: any) => person.name).filter(Boolean),
+    synopsis: summary.overview || details.overview || "简介待更新。",
+    posterUrl: imageUrl(summary.poster_path || details.poster_path, "w500", fallbackById(fallbackPosters, summary.id)),
+    backdropUrl: imageUrl(summary.backdrop_path || details.backdrop_path, "w1280", fallbackById(fallbackBackdrops, summary.id)),
+    trailerUrl: fallbackById(fallbackVideos, summary.id),
+    trending: trendingIds.has(summary.id),
+    language: summary.original_language || details.original_language || "en",
+    maturityRating: summary.adult || details.adult ? "R" : "PG-13",
+    likesCount: formatLikes(summary.vote_count || details.vote_count),
+    platforms: normalizeProviders(details["watch/providers"]),
+  };
+}
+
+async function getMoviesFromTmdb(): Promise<Movie[]> {
+  const cached = getCached<Movie[]>("tmdb:movies:v2");
+  if (cached) return cached;
+
+  const genreMap = await getGenreMap();
+  const [trending, popular, topRated, nowPlaying] = await Promise.all([
+    tmdbFetch<{ results: TmdbMovieSummary[] }>("/trending/movie/week?language=zh-CN&page=1"),
+    tmdbFetch<{ results: TmdbMovieSummary[] }>("/movie/popular?language=zh-CN&page=1"),
+    tmdbFetch<{ results: TmdbMovieSummary[] }>("/movie/top_rated?language=zh-CN&page=1"),
+    tmdbFetch<{ results: TmdbMovieSummary[] }>("/movie/now_playing?language=zh-CN&page=1"),
+  ]);
+  const trendingIds = new Set(trending.results.map((movie) => movie.id));
+  const uniqueMovies = [...trending.results, ...popular.results, ...topRated.results, ...nowPlaying.results]
+    .filter((movie, index, all) => all.findIndex((item) => item.id === movie.id) === index)
+    .slice(0, 48);
+  const movies = await Promise.all(uniqueMovies.map((movie) => enrichMovie(movie, genreMap, trendingIds)));
+
+  setCached("tmdb:movies:v2", movies, 30 * 60 * 1000);
+  return movies;
+}
+
+async function searchMoviesFromTmdb(query: string): Promise<Movie[]> {
+  const normalizedQuery = query.trim();
+  if (normalizedQuery.length < 2) return [];
+
+  const cacheKey = `tmdb:search:${normalizedQuery.toLowerCase()}:v1`;
+  const cached = getCached<Movie[]>(cacheKey);
+  if (cached) return cached;
+
+  const genreMap = await getGenreMap();
+  const data = await tmdbFetch<{ results: TmdbMovieSummary[] }>(
+    `/search/movie?language=zh-CN&include_adult=false&page=1&query=${encodeURIComponent(normalizedQuery)}`,
+  );
+  const uniqueMovies = (data.results || [])
+    .filter((movie, index, all) => movie?.id && all.findIndex((item) => item.id === movie.id) === index)
+    .slice(0, 20);
+  const movies = await Promise.all(uniqueMovies.map((movie) => enrichMovie(movie, genreMap, new Set())));
+
+  setCached(cacheKey, movies, 30 * 60 * 1000);
+  return movies;
+}
+
+function parseVibeJson(content: string, movies: Movie[]) {
+  const movieById = new Map(movies.map((movie) => [movie.id, movie]));
+  const movieByTitle = new Map(movies.map((movie) => [movie.title.trim().toLowerCase(), movie]));
+
+  try {
+    const parsed = JSON.parse(content) as Partial<VibeResult>;
+    const parsedRecommendations = Array.isArray(parsed.recommendations)
+      ? parsed.recommendations
+        .map((item) => {
+          const requestedId = String(item?.movieId || "");
+          const requestedTitle = String(item?.title || "").trim().toLowerCase();
+          const matchedMovie = movieById.get(requestedId) || movieByTitle.get(requestedTitle);
+          if (!matchedMovie) return null;
+
+          return {
+            movieId: matchedMovie.id,
+            title: matchedMovie.title,
+            match: Math.max(0, Math.min(100, Number(item?.match || 0))),
+            reason: String(item?.reason || "这部作品和你此刻的状态比较贴合。"),
+            feeling: String(item?.feeling || "更清楚地感受到自己此刻真正需要什么。"),
+          };
+        })
+        .filter((item): item is Omit<VibeRecommendation, "rank"> => Boolean(item))
+        .slice(0, 4)
+        .map((item, index) => ({
+          ...item,
+          rank: index + 1,
+        }))
+      : [];
+    const usedIds = new Set(parsedRecommendations.map((item) => item.movieId));
+    const fallbackRecommendations = movies
+      .filter((movie) => !usedIds.has(movie.id))
+      .slice(0, Math.max(0, 4 - parsedRecommendations.length))
+      .map((movie, index) => ({
+        rank: parsedRecommendations.length + index + 1,
+        movieId: movie.id,
+        title: movie.title,
+        match: Math.max(70, 88 - index * 3),
+        reason: "这部作品来自当前站内片库，适合作为此刻 VIBE 推荐的补充选择。",
+        feeling: "获得一段更容易进入、也更贴近当下情绪的观影体验。",
+      }));
+    const recommendations = [...parsedRecommendations, ...fallbackRecommendations].slice(0, 4);
+    const requestedPickId = String(parsed.tonightPick?.movieId || "");
+    const requestedPickTitle = String(parsed.tonightPick?.title || "").trim().toLowerCase();
+    const matchedPick = recommendations.find((item) => item.movieId === requestedPickId) ||
+      recommendations.find((item) => item.title.trim().toLowerCase() === requestedPickTitle) ||
+      recommendations[0];
+
+    return {
+      need: String(parsed.need || "你现在需要一部真正贴合当下状态的作品。"),
+      recommendations,
+      tonightPick: {
+        movieId: matchedPick?.movieId || "",
+        title: matchedPick?.title || "第一部推荐",
+        reason: String(parsed.tonightPick?.reason || "它最能承接你此刻的情绪需求。"),
+      },
+    };
+  } catch {
+    return {
+      need: "你现在需要一部真正贴合当下状态的作品。",
+      recommendations: [
+        {
+          rank: 1,
+          movieId: movies[0]?.id || "",
+          title: "VIBE 推荐暂时没有解析成功",
+          match: 80,
+          reason: content || "AI 已返回内容，但格式暂时不适合页面展示。",
+          feeling: "稍后再试一次，推荐会重新整理成完整结构。",
+        },
+      ],
+      tonightPick: {
+        movieId: movies[0]?.id || "",
+        title: "VIBE 推荐暂时没有解析成功",
+        reason: "当前结果需要重新生成后才能稳定展示。",
+      },
+    };
+  }
+}
+
+app.get("/health", (_req, res) => {
+  res.json({ ok: true });
+});
+
+app.get("/api/movies", async (_req, res) => {
+  try {
+    const movies = await getMoviesFromTmdb();
+    res.json({ movies, source: "tmdb" });
+  } catch (error) {
+    res.status(502).json({
+      error: error instanceof Error ? error.message : "Failed to load TMDB movies",
+    });
+  }
+});
+
+app.get("/api/movies/search", async (req, res) => {
+  try {
+    const query = String(req.query.q || "").trim();
+    if (query.length < 2) {
+      res.json({ movies: [], source: "tmdb-search" });
+      return;
+    }
+
+    const movies = await searchMoviesFromTmdb(query);
+    res.json({ movies, source: "tmdb-search" });
+  } catch (error) {
+    res.status(502).json({
+      error: error instanceof Error ? error.message : "Failed to search TMDB movies",
+    });
+  }
+});
+
+app.post("/api/vibe", async (req, res) => {
+  try {
+    if (!deepseekApiKey) {
+      res.status(500).json({ error: "DEEPSEEK_API_KEY is not configured" });
+      return;
+    }
+
+    const message = String(req.body?.message || "").trim();
+    if (!message) {
+      res.status(400).json({ error: "message is required" });
+      return;
+    }
+
+    const movies = Array.isArray(req.body?.movies) ? req.body.movies.slice(0, 60) : [];
+    const response = await fetch("https://api.deepseek.com/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${deepseekApiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: deepseekModel,
+        temperature: 0.7,
+        response_format: { type: "json_object" },
+        messages: [
+          {
+            role: "system",
+            content: vibeSystemPrompt,
+          },
+          {
+            role: "user",
+            content: JSON.stringify({
+              userFeeling: message,
+              note: "可参考 movies 中的站内真实 TMDB 片单，但最终推荐以用户当下状态最适合为准。",
+              movies: movies.map((movie: Movie) => ({
+                id: movie.id,
+                title: movie.title,
+                year: movie.year,
+                genres: movie.genres,
+                rating: movie.rating,
+                language: movie.language,
+                synopsis: movie.synopsis,
+              })),
+            }),
+          },
+        ],
+      }),
+    });
+
+    if (!response.ok) {
+      res.status(response.status).json({ error: `DeepSeek request failed: ${response.status}` });
+      return;
+    }
+
+    const data = await response.json() as any;
+    const content = data?.choices?.[0]?.message?.content || "{}";
+    res.json(parseVibeJson(content, movies));
+  } catch (error) {
+    res.status(502).json({
+      error: error instanceof Error ? error.message : "Failed to call DeepSeek",
+    });
+  }
+});
+
+app.listen(port, () => {
+  console.log(`Hooyi API server listening on http://localhost:${port}`);
+});
