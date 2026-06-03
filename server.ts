@@ -92,7 +92,7 @@ const watchRegions = (process.env.TMDB_WATCH_REGIONS || process.env.TMDB_WATCH_R
   .split(",")
   .map((region) => region.trim().toUpperCase())
   .filter(Boolean);
-const apiProxyUrl = process.env.API_PROXY_URL || process.env.HTTPS_PROXY || process.env.HTTP_PROXY;
+const apiProxyUrl = process.env.API_PROXY_URL;
 const cache = new Map<string, CacheItem<unknown>>();
 const allowedOrigins = (process.env.CORS_ORIGINS || process.env.CORS_ORIGIN || "http://localhost:3000")
   .split(",")
