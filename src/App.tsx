@@ -1,5 +1,5 @@
-import React, { useEffect, useState, useMemo } from "react";
-import { Bell, ChevronDown, Flame, Check, Info, Library, Sparkles, Filter, RefreshCw, Star, Play, Sun, Moon, Mail } from "lucide-react";
+import React, { useEffect, useRef, useState, useMemo } from "react";
+import { Bell, Flame, Check, Info, Library, Sparkles, Filter, RefreshCw, Star, Play, Sun, Moon, Mail } from "lucide-react";
 import Sidebar from "./components/Sidebar";
 import FilterPanel from "./components/FilterPanel";
 import HeroSection from "./components/HeroSection";
@@ -15,12 +15,21 @@ import {
   filterAndSortMovies,
   findContinueWatchingMovie,
   findMovieById,
+  fetchCachedCatalogMovies,
   fetchCatalogMovies,
   getCatalogMovies,
   getSimilarMovies,
   getTrendingMovies,
   searchCatalogMovies,
 } from "./api/movieService";
+import {
+  loadUserSavedData,
+  removeWatchHistoryItems,
+  removeWatchlistItems,
+  saveGenreScores,
+  upsertWatchHistoryItem,
+  upsertWatchlistItem,
+} from "./api/userDataService";
 
 interface NotificationItem {
   id: string;
@@ -28,6 +37,8 @@ interface NotificationItem {
   time: string;
   unread: boolean;
 }
+
+type LoadingPhase = "connecting" | "preloading" | "ready";
 
 const hasWatchProviders = (movie: Movie) => Boolean(movie.platforms?.length);
 
@@ -37,6 +48,48 @@ const mergeMoviesById = (baseMovies: Movie[], incomingMovies: Movie[]) => {
     movieMap.set(movie.id, movie);
   }
   return Array.from(movieMap.values());
+};
+
+const isChineseMovie = (movie: Movie) => movie.language === "zh";
+
+const rotateBySeed = <T,>(items: T[], seed: number) => {
+  if (items.length <= 1) return items;
+  const offset = Math.floor(seed * items.length) % items.length;
+  return [...items.slice(offset), ...items.slice(0, offset)];
+};
+
+const buildFocusMovies = (rankedMovies: Movie[], seed: number, limit = 10) => {
+  const chineseMovies = rankedMovies.filter(isChineseMovie);
+  const foreignMovies = rankedMovies.filter((movie) => !isChineseMovie(movie));
+  const firstChinesePool = chineseMovies.slice(0, Math.min(chineseMovies.length, 20));
+  const firstMovie = firstChinesePool[Math.floor(seed * firstChinesePool.length) % firstChinesePool.length] || chineseMovies[0];
+  const selected = new Map<string, Movie>();
+
+  if (firstMovie) {
+    selected.set(firstMovie.id, firstMovie);
+  }
+
+  const rotatedChineseMovies = rotateBySeed(chineseMovies.filter((movie) => movie.id !== firstMovie?.id), seed * 0.73 + 0.11);
+  const rotatedForeignMovies = rotateBySeed(foreignMovies, seed * 0.41 + 0.37);
+  const targetChineseCount = Math.min(7, limit);
+  const targetForeignCount = Math.max(0, limit - targetChineseCount);
+
+  for (const movie of rotatedChineseMovies) {
+    if (selected.size >= targetChineseCount) break;
+    selected.set(movie.id, movie);
+  }
+
+  for (const movie of rotatedForeignMovies) {
+    if (Array.from(selected.values()).filter((movie) => !isChineseMovie(movie)).length >= targetForeignCount) break;
+    selected.set(movie.id, movie);
+  }
+
+  for (const movie of rankedMovies) {
+    if (selected.size >= limit) break;
+    selected.set(movie.id, movie);
+  }
+
+  return Array.from(selected.values()).slice(0, limit);
 };
 
 const readStoredMovieIds = (storageKey: string): string[] => {
@@ -59,29 +112,142 @@ const readStoredMovieIds = (storageKey: string): string[] => {
   }
 };
 
+const readStoredGenreScores = (): Record<string, number> => {
+  try {
+    const saved = localStorage.getItem("movieApp_genres");
+    return saved ? JSON.parse(saved) : {};
+  } catch {
+    return {};
+  }
+};
+
+const mergeUniqueIds = (primary: string[], secondary: string[]) => {
+  return Array.from(new Set([...primary, ...secondary]));
+};
+
+function LoadingScreen({
+  phase,
+  error,
+  onRetry,
+}: {
+  phase: LoadingPhase;
+  error: string | null;
+  onRetry: () => void;
+}) {
+  const statusText = error ? "暂时没有加载完成" : "请稍后";
+  const descriptionText = error
+    ? "好影暂时没有准备好今晚的内容。"
+    : "好影正在整理今晚值得看的内容";
+
+  return (
+    <div className="relative min-h-screen overflow-hidden bg-[#edf2ff] text-[#18213f] flex items-center justify-center px-6 py-10">
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_12%,rgba(255,132,93,0.28),transparent_28%),radial-gradient(circle_at_78%_18%,rgba(74,111,197,0.24),transparent_30%),linear-gradient(145deg,#f8fbff_0%,#dce7ff_48%,#f4d9ea_100%)]" />
+      <div className="absolute inset-0 opacity-[0.22] [background-image:linear-gradient(rgba(24,33,63,0.12)_1px,transparent_1px),linear-gradient(90deg,rgba(24,33,63,0.1)_1px,transparent_1px)] [background-size:42px_42px]" />
+
+      <section className="relative w-full max-w-xl rounded-[32px] border border-white/70 bg-white/35 px-7 py-8 md:px-10 md:py-10 shadow-[0_28px_90px_rgba(70,85,140,0.22)] backdrop-blur-2xl text-left">
+        <div className="mb-8 flex items-center justify-between gap-6">
+          <div>
+            <p className="text-xs font-black uppercase text-[#e86f55] tracking-[0.24em]">Hooyi</p>
+            <h1 className="mt-3 text-4xl md:text-5xl font-serif font-black leading-none text-[#141b34]">
+              好影
+            </h1>
+          </div>
+          <div className="relative h-20 w-20 shrink-0">
+            <div className="absolute inset-0 rounded-[24px] bg-[#141b34] rotate-6 shadow-2xl" />
+            <div className="absolute inset-2 rounded-[20px] bg-[#ff765e] -rotate-6" />
+            <div className="absolute inset-x-6 inset-y-4 rounded-full border-4 border-white/80" />
+          </div>
+        </div>
+
+        <div className="mb-5 h-2 overflow-hidden rounded-full bg-[#141b34]/10">
+          <div className="h-full w-2/3 rounded-full bg-gradient-to-r from-[#ff765e] via-[#ffd36e] to-[#4f6fd4] animate-[pulse_1.2s_ease-in-out_infinite]" />
+        </div>
+
+        <p className="text-lg md:text-xl font-black text-[#141b34]">{statusText}</p>
+        <p className="mt-3 text-sm leading-relaxed text-[#36405f]/80">
+          {descriptionText}
+        </p>
+        {!error && (
+          <p className="mt-2 text-xs font-semibold text-[#5a6687]/70">
+            首次进入加载时间较长
+          </p>
+        )}
+
+        {error && (
+          <button
+            onClick={onRetry}
+            className="mt-6 rounded-full bg-[#141b34] px-6 py-3 text-sm font-black text-white shadow-xl shadow-[#141b34]/20 transition-all hover:bg-[#243154] active:scale-[0.98]"
+          >
+            再试一次
+          </button>
+        )}
+      </section>
+    </div>
+  );
+}
+
 export default function App() {
-  const fallbackCatalogMovies = useMemo(() => getCatalogMovies(), []);
-  const [catalogMovies, setCatalogMovies] = useState<Movie[]>(fallbackCatalogMovies);
+  const focusSeedRef = useRef(Math.random());
+  const [catalogMovies, setCatalogMovies] = useState<Movie[]>(() => getCatalogMovies());
+  const [searchResultMovies, setSearchResultMovies] = useState<Movie[]>([]);
+  const [catalogSyncError, setCatalogSyncError] = useState<string | null>(null);
+  const currentUser = useMemo<{ id: string; email?: string } | null>(() => null, []);
+  const loadedUserDataRef = useRef<string | null>(null);
+  const setUserDataStatus = (_status: string) => undefined;
 
   useEffect(() => {
     let cancelled = false;
+    let retryTimer: number | undefined;
 
-    fetchCatalogMovies()
-      .then((movies) => {
+    async function loadCachedCatalog() {
+      try {
+        const movies = await fetchCachedCatalogMovies();
         if (!cancelled && movies.length > 0) {
           setCatalogMovies(movies);
         }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setCatalogMovies(fallbackCatalogMovies);
+      } catch {
+        // The local built-in catalog remains available if the static cache is missing.
+      }
+    }
+
+    async function loadRealCatalog(attempt = 0) {
+      if (attempt === 0) {
+        setCatalogSyncError(null);
+      }
+
+      try {
+        const movies = await fetchCatalogMovies();
+        if (movies.length === 0) {
+          throw new Error("Real catalog is empty");
         }
-      });
+
+        if (!cancelled) {
+          setCatalogMovies(movies);
+          setCatalogSyncError(null);
+          retryTimer = window.setTimeout(() => {
+            void loadRealCatalog(attempt + 1);
+          }, attempt === 0 ? 30000 : 180000);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setCatalogSyncError(error instanceof Error ? error.message : "Failed to load real catalog");
+          retryTimer = window.setTimeout(() => {
+            void loadRealCatalog(attempt + 1);
+          }, Math.min(3000 + attempt * 2000, 15000));
+        }
+      }
+    }
+
+    void loadCachedCatalog();
+    void loadRealCatalog();
 
     return () => {
       cancelled = true;
+      if (retryTimer) {
+        window.clearTimeout(retryTimer);
+      }
     };
-  }, [fallbackCatalogMovies]);
+  }, []);
 
   // Multidimensional Movie Filter States
   const [filters, setFilters] = useState<FilterState>({
@@ -96,14 +262,17 @@ export default function App() {
 
   useEffect(() => {
     const query = filters.searchQuery.trim();
-    if (query.length < 2) return;
+    if (query.length < 2) {
+      setSearchResultMovies([]);
+      return;
+    }
 
     let cancelled = false;
     const timer = window.setTimeout(() => {
       searchCatalogMovies(query)
         .then((movies) => {
-          if (!cancelled && movies.length > 0) {
-            setCatalogMovies((currentMovies) => mergeMoviesById(currentMovies, movies));
+          if (!cancelled) {
+            setSearchResultMovies(movies);
           }
         })
         .catch(() => {
@@ -120,7 +289,8 @@ export default function App() {
   // Controls UI widgets
   const [isFilterPanelOpen, setIsFilterPanelOpen] = useState(false);
   const [showProfileDropdown, setShowProfileDropdown] = useState(false);
-  const [themeMode, setThemeMode] = useState<"night" | "day">("night");
+  const [themeMode, setThemeMode] = useState<"night" | "day">("day");
+  const [swipedMovieIds, setSwipedMovieIds] = useState<string[]>([]);
 
   // Playback / Detail Overlay States
   const [activeVideo, setActiveVideo] = useState<{ url: string; title: string; movieTitle: string } | null>(null);
@@ -137,12 +307,7 @@ export default function App() {
   });
 
   const [genreScores, setGenreScores] = useState<Record<string, number>>(() => {
-    try {
-      const saved = localStorage.getItem('movieApp_genres');
-      return saved ? JSON.parse(saved) : {};
-    } catch {
-      return {};
-    }
+    return readStoredGenreScores();
   });
 
   const watchHistoryMovies = useMemo(() => {
@@ -151,7 +316,7 @@ export default function App() {
       .filter((m): m is Movie => m !== undefined);
   }, [watchHistoryIds, catalogMovies]);
 
-  const trackGenreScore = (movie: Movie, weight: number = 1) => {
+  const trackGenreScore = (movie: Movie, weight: number = 1, _action?: string) => {
     setGenreScores(prev => {
       const updated = { ...prev };
       for (const genre of movie.genres) {
@@ -171,12 +336,12 @@ export default function App() {
       localStorage.setItem('movieApp_history', JSON.stringify(topHistory));
       return topHistory;
     });
-    trackGenreScore(movie, 10);
+    trackGenreScore(movie, 10, "watch_platform");
   };
 
   const handleOpenDetailModal = (movie: Movie | null) => {
     if (movie) {
-      trackGenreScore(movie, 1);
+      trackGenreScore(movie, 1, "view_detail");
     }
     setActiveDetailMovie(movie);
   };
@@ -190,14 +355,66 @@ export default function App() {
       .filter((m): m is Movie => m !== undefined);
   }, [watchlistIds, catalogMovies]);
 
+  useEffect(() => {
+    if (!currentUser || loadedUserDataRef.current === currentUser.id) return;
+
+    loadedUserDataRef.current = currentUser.id;
+    setUserDataStatus("正在同步账号数据");
+
+    loadUserSavedData(currentUser.id)
+      .then((cloudData) => {
+        const localWatchlistIds = readStoredMovieIds("movieApp_watchlist");
+        const localHistoryIds = readStoredMovieIds("movieApp_history");
+        const localGenreScores = readStoredGenreScores();
+        const mergedWatchlistIds = mergeUniqueIds(cloudData.watchlistIds, localWatchlistIds);
+        const mergedHistoryIds = mergeUniqueIds(cloudData.watchHistoryIds, localHistoryIds).slice(0, 50);
+        const mergedGenreScores = {
+          ...localGenreScores,
+          ...cloudData.genreScores,
+        };
+
+        setWatchlistIds(mergedWatchlistIds);
+        setWatchHistoryIds(mergedHistoryIds);
+        setGenreScores(mergedGenreScores);
+        localStorage.setItem("movieApp_watchlist", JSON.stringify(mergedWatchlistIds));
+        localStorage.setItem("movieApp_history", JSON.stringify(mergedHistoryIds));
+        localStorage.setItem("movieApp_genres", JSON.stringify(mergedGenreScores));
+
+        void saveGenreScores(currentUser.id, mergedGenreScores).catch(() => undefined);
+        for (const id of mergedWatchlistIds) {
+          const movie = findMovieById(id, catalogMovies);
+          if (movie) void upsertWatchlistItem(currentUser.id, movie).catch(() => undefined);
+        }
+        for (const id of mergedHistoryIds) {
+          const movie = findMovieById(id, catalogMovies);
+          if (movie) void upsertWatchHistoryItem(currentUser.id, movie).catch(() => undefined);
+        }
+
+        setUserDataStatus("账号数据已同步");
+      })
+      .catch(() => {
+        loadedUserDataRef.current = null;
+        setUserDataStatus("账号数据同步失败，正在使用本地数据");
+      });
+  }, [currentUser, catalogMovies]);
+
   const handleAddToWatchlist = (movie: Movie) => {
-    trackGenreScore(movie, 3);
+    setSwipedMovieIds((prev) => prev.includes(movie.id) ? prev : [...prev, movie.id]);
+    trackGenreScore(movie, 8, "add_watchlist");
     setWatchlistIds(prev => {
       if (prev.includes(movie.id)) return prev;
       const next = [movie.id, ...prev];
       localStorage.setItem('movieApp_watchlist', JSON.stringify(next));
       return next;
     });
+    if (currentUser) {
+      void upsertWatchlistItem(currentUser.id, movie).catch(() => undefined);
+    }
+  };
+
+  const handleDismissSwipeMovie = (movie: Movie) => {
+    setSwipedMovieIds((prev) => prev.includes(movie.id) ? prev : [...prev, movie.id]);
+    trackGenreScore(movie, -5, "dismiss");
   };
 
   const handleRemoveFromWatchlist = (idsToRemove: string[]) => {
@@ -206,6 +423,9 @@ export default function App() {
       localStorage.setItem('movieApp_watchlist', JSON.stringify(next));
       return next;
     });
+    if (currentUser) {
+      void removeWatchlistItems(currentUser.id, idsToRemove).catch(() => undefined);
+    }
   };
 
   const handleRemoveFromHistory = (idsToRemove: string[]) => {
@@ -214,11 +434,15 @@ export default function App() {
       localStorage.setItem('movieApp_history', JSON.stringify(next));
       return next;
     });
+    if (currentUser) {
+      void removeWatchHistoryItems(currentUser.id, idsToRemove).catch(() => undefined);
+    }
   };
 
   // Personalized Trending Movies
   const trendMovies = useMemo(() => {
-    return getTrendingMovies(catalogMovies, genreScores);
+    const rankedMovies = getTrendingMovies(catalogMovies, genreScores, 80);
+    return buildFocusMovies(rankedMovies, focusSeedRef.current);
   }, [catalogMovies, genreScores]);
   
   const [featuredIndex, setFeaturedIndex] = useState(0);
@@ -235,29 +459,49 @@ export default function App() {
 
   const unreadCount = notifications.filter(n => n.unread).length;
 
+  const searchableMovies = useMemo(() => {
+    return filters.searchQuery.trim().length >= 2
+      ? mergeMoviesById(catalogMovies, searchResultMovies)
+      : catalogMovies;
+  }, [catalogMovies, filters.searchQuery, searchResultMovies]);
+
   // Live Filtering and Sorting logic computation
   const filteredAndSortedMovies = useMemo(() => {
-    return filterAndSortMovies(catalogMovies, filters, genreScores);
-  }, [catalogMovies, filters, genreScores]);
+    return filterAndSortMovies(searchableMovies, filters, genreScores);
+  }, [searchableMovies, filters, genreScores]);
 
   const watchableCatalogMovies = useMemo(() => {
     return catalogMovies.filter(hasWatchProviders);
   }, [catalogMovies]);
 
-  const watchableFilteredAndSortedMovies = useMemo(() => {
-    return filteredAndSortedMovies.filter(hasWatchProviders);
-  }, [filteredAndSortedMovies]);
+  const swipeCandidateMovies = useMemo(() => {
+    const sourceMovies = watchableCatalogMovies.length > 0 ? watchableCatalogMovies : catalogMovies;
+    const baseMovies = sourceMovies.filter((movie) => !swipedMovieIds.includes(movie.id));
+    const availableMovies = baseMovies.length > 0 ? baseMovies : sourceMovies;
+    return [...availableMovies]
+      .map((movie) => {
+        const preferenceScore = movie.genres.reduce((score, genre) => score + (genreScores[genre] || 0), 0);
+        const watchlistPenalty = watchlistIds.includes(movie.id) ? -30 : 0;
+
+        return {
+          movie,
+          score: preferenceScore + watchlistPenalty + movie.rating * 0.5 + Math.random() * 2,
+        };
+      })
+      .sort((a, b) => b.score - a.score)
+      .map((item) => item.movie);
+  }, [watchableCatalogMovies, catalogMovies, genreScores, watchlistIds, swipedMovieIds]);
 
   const vibeCandidateMovies = watchableCatalogMovies.length > 0 ? watchableCatalogMovies : catalogMovies;
 
   const swipeDeckResetKey = useMemo(
-    () => JSON.stringify({ filters, onlineOnly: true }),
-    [filters],
+    () => catalogMovies.map((movie) => movie.id).join("|"),
+    [catalogMovies],
   );
 
   const activeSimilarMovies = useMemo(() => {
-    return activeDetailMovie ? getSimilarMovies(activeDetailMovie, catalogMovies) : [];
-  }, [activeDetailMovie, catalogMovies]);
+    return activeDetailMovie ? getSimilarMovies(activeDetailMovie, searchableMovies) : [];
+  }, [activeDetailMovie, searchableMovies]);
 
   // Handle Carousel Pagination limits
   const preloadBackdrop = (movie: Movie) => {
@@ -314,7 +558,7 @@ export default function App() {
 
   // Play clip direct from movie object wrapper
   const handlePlayMovieTrailer = (movie: Movie) => {
-    trackGenreScore(movie, 2);
+    trackGenreScore(movie, 2, "play_trailer");
     setActiveDetailMovie(null); // Close the detail modal if it's open
     setActiveVideo({
       url: movie.trailerUrl,
@@ -397,6 +641,11 @@ export default function App() {
           border: "1px solid rgba(255, 255, 255, 0.22)"
         }}
       >
+        {false && catalogSyncError && (
+          <div className="rounded-2xl border border-amber-300/20 bg-amber-300/10 px-4 py-2 text-xs font-semibold text-amber-50/80">
+            正在使用本地片单，在线电影数据稍后会自动同步。
+          </div>
+        )}
         
         {/* Brand Header */}
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between border-b border-white/[0.05] pb-4 mb-2 gap-3 relative">
@@ -423,7 +672,7 @@ export default function App() {
             selectedPlatform={filters.selectedPlatform || null}
             onSelectPlatform={(platform) => handleUpdateFilters({ selectedPlatform: platform })}
             onDetails={(movie) => setActiveDetailMovie(movie)}
-            movies={catalogMovies}
+            movies={searchableMovies}
             watchlist={watchlist}
             watchHistory={watchHistoryMovies}
             onOpenFullView={(view) => setActiveTab(view)}
@@ -433,10 +682,10 @@ export default function App() {
           <main className="flex-1 w-full flex flex-col gap-5 min-w-0 min-h-[650px] lg:min-h-[750px]">
             
             {/* Top Navigation Row */}
-            <header className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 py-2 lg:py-0 lg:h-[44px] relative z-30 w-full shrink-0">
+            <header className="grid grid-cols-1 lg:grid-cols-[1fr_minmax(320px,520px)_1fr] items-center gap-4 py-2 lg:py-0 lg:h-[44px] relative z-30 w-full shrink-0">
               
               {/* Category Pill Buttons */}
-              <nav className="flex flex-1 items-stretch gap-2 p-1 bg-white/[0.02] border border-white/[0.04] backdrop-blur-md rounded-2xl w-full overflow-hidden">
+              <nav className="flex items-stretch gap-2 p-1 bg-white/[0.02] border border-white/[0.04] backdrop-blur-md rounded-2xl w-full overflow-hidden lg:col-start-2">
                 {menuCategories.map((cat) => {
                   const isActive = activeTab === cat;
 
@@ -457,7 +706,7 @@ export default function App() {
               </nav>
 
               {/* Utility actions side elements */}
-              <div className="flex items-center justify-end gap-3 w-full lg:w-auto relative z-20">
+              <div className="flex items-center justify-end gap-3 w-full lg:w-auto relative z-20 lg:col-start-3">
 
                 {/* Day / Night Theme Toggle */}
                 <button
@@ -488,31 +737,68 @@ export default function App() {
                   </div>
                 </button>
 
+                <button
+                  type="button"
+                  onClick={() => undefined}
+                  className="hidden"
+                >
+                  <Mail size={14} />
+                  <span className="hidden sm:inline max-w-[140px] truncate">
+                    {currentUser?.email || "登录保存偏好"}
+                  </span>
+                </button>
+
+                {false && currentUser && (
+                  <button
+                    type="button"
+                    onClick={() => undefined}
+                    className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/[0.06] bg-white/[0.02] text-white/65 transition-all hover:bg-white/[0.08] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-coral"
+                    title="退出登录"
+                    aria-label="退出登录"
+                  >
+                    <span />
+                  </button>
+                )}
+
                 {/* Profile menu drop toggle */}
                 <div className="relative">
                   <button
                     onClick={() => {
                       setShowProfileDropdown(!showProfileDropdown);
                     }}
-                    aria-label="Profile dropdown"
+                    aria-label="Contact developer"
                     aria-haspopup="true"
                     aria-expanded={showProfileDropdown}
-                    className="flex items-center gap-3 p-1.5 pr-3 bg-white/[0.02] hover:bg-white/[0.06] border border-white/[0.06] rounded-xl transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-coral"
+                    className="flex h-10 w-10 items-center justify-center bg-white/[0.02] hover:bg-white/[0.06] border border-white/[0.06] rounded-xl transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-coral"
                   >
-                    <div className="w-7 h-7 rounded-lg overflow-hidden bg-white/5 relative border border-white/10 shrink-0 flex items-center justify-center">
-                      <Mail size={14} className="text-white/70" />
+                    <div className="flex items-center justify-center">
+                      <Mail size={17} strokeWidth={1.9} className="text-white/75" />
                     </div>
-                    <div className="hidden sm:flex flex-col text-left">
+                    <div className="hidden">
                       <span className="text-white text-[11px] font-bold tracking-tight">开发者</span>
                       <span className="text-white/40 text-[9px] font-mono">@yuzhaodai</span>
                     </div>
-                    <ChevronDown size={11} className="text-white/40" />
+                    {false && <span />}
                   </button>
 
-                  {/* Profile configuration dropdown options */}
                   {showProfileDropdown && (
-                    <div className="absolute right-0 mt-3 z-40 w-52 p-2 rounded-2xl bg-neutral-950 border border-white/10 shadow-2xl flex flex-col gap-1 text-left animate-in fade-in slide-in-from-top-2 duration-200">
+                    <div className="absolute right-0 mt-3 z-40 w-56 p-2 rounded-2xl bg-neutral-950 border border-white/10 shadow-2xl flex flex-col gap-1 text-left animate-in fade-in slide-in-from-top-2 duration-200">
                       <div className="px-3 py-3 rounded-lg bg-white/[0.02] border border-white/[0.02]">
+                        <p className="text-[10px] text-white/50 mb-1.5">
+                          {"\u8054\u7cfb\u5f00\u53d1\u8005 / \u610f\u89c1\u53cd\u9988"}
+                        </p>
+                        <p className="text-xs text-white font-bold tracking-tight select-text selection:bg-brand-coral/30 cursor-text break-all">
+                          yuzhaodai@gmail.com
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Profile configuration dropdown options */}
+                  {false && showProfileDropdown && (
+                    <div className="absolute right-0 mt-3 z-40 w-56 p-2 rounded-2xl bg-neutral-950 border border-white/10 shadow-2xl flex flex-col gap-1 text-left animate-in fade-in slide-in-from-top-2 duration-200">
+                      <div className="px-3 py-3 rounded-lg bg-white/[0.02] border border-white/[0.02]">
+                        <p className="text-[10px] text-white/50 mb-1.5">联系开发者 / 意见反馈</p>
                         <p className="text-[10px] text-white/50 lowercase mb-1.5">联系开发者 / 意见反馈</p>
                         <p className="text-xs text-white font-bold tracking-tight select-text selection:bg-brand-coral/30 cursor-text break-all">
                           yuzhaodai@gmail.com
@@ -532,15 +818,16 @@ export default function App() {
               onResetFilters={handleResetFilters}
               isOpen={isFilterPanelOpen}
               onToggle={() => setIsFilterPanelOpen(!isFilterPanelOpen)}
-              moviesCount={activeTab === "随心一刷" ? watchableFilteredAndSortedMovies.length : filteredAndSortedMovies.length}
+              moviesCount={activeTab === "随心一刷" ? swipeCandidateMovies.length : filteredAndSortedMovies.length}
             />
 
             {activeTab === "随心一刷" ? (
               <TinderSwipeDeck 
-                movies={watchableFilteredAndSortedMovies}
+                movies={swipeCandidateMovies}
                 resetKey={swipeDeckResetKey}
                 onDetails={handleOpenDetailModal} 
                 onAddToWatchlist={handleAddToWatchlist}
+                onDismiss={handleDismissSwipeMovie}
               />
             ) : activeTab === "Vibe" ? (
               <VibePrompt

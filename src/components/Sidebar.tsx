@@ -2,6 +2,7 @@ import React from "react";
 import { Search, Flame, Play, CheckCircle, Settings2, ChevronDown } from "lucide-react";
 import { Movie, WatchPlatformType } from "../types";
 import { findMovieByTitle } from "../api/movieService";
+import { hideBrokenImage } from "./imageFallback";
 
 interface SidebarProps {
   searchQuery: string;
@@ -69,6 +70,7 @@ export default function Sidebar({
               alt={movie.title}
               loading="lazy"
               referrerPolicy="no-referrer"
+              onError={hideBrokenImage}
               className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
             />
             <div className="absolute inset-0 bg-black/30 group-hover:bg-black/10 transition-colors flex items-center justify-center">
@@ -116,6 +118,7 @@ export default function Sidebar({
                 alt={item.title}
                 loading="lazy"
                 referrerPolicy="no-referrer"
+                onError={hideBrokenImage}
                 className="w-full h-full object-cover group-hover:scale-105 transition-transform"
               />
             </div>

@@ -1,6 +1,7 @@
 import React from "react";
 import { ChevronLeft, ChevronRight, Tv } from "lucide-react";
 import { Movie } from "../types";
+import { hideBrokenImage } from "./imageFallback";
 
 interface HeroSectionProps {
   movie: Movie;
@@ -21,14 +22,13 @@ export default function HeroSection({ movie, onDetails, onNext, onPrev, isSwitch
           alt={movie.title}
           loading="eager"
           referrerPolicy="no-referrer"
-          className="w-full h-full object-cover object-center group-hover:scale-[1.03] transition-transform duration-[8000ms] ease-out-sine opacity-80"
+          onError={hideBrokenImage}
+          className="w-full h-full object-cover object-center group-hover:scale-[1.03] transition-transform duration-[8000ms] ease-out-sine opacity-100"
         />
-        {/* Layered cinematic gradients to ensure high standard color contrast and clear text readability */}
-        <div className="absolute inset-0 bg-gradient-to-t from-neutral-900 via-neutral-900/40 to-transparent"></div>
-        <div className="absolute inset-0 bg-gradient-to-r from-neutral-900 via-neutral-900/40 to-transparent"></div>
-        <div className="absolute inset-0 bg-gradient-to-b from-neutral-900/50 via-transparent to-transparent"></div>
-        {/* Colorful highlight blending to mirror standard film theaters */}
-        <div className="absolute -bottom-20 -left-20 w-80 h-80 bg-brand-coral/20 rounded-full blur-[120px] pointer-events-none"></div>
+        <div className="absolute inset-0 bg-gradient-to-t from-neutral-950/55 via-neutral-950/10 to-transparent"></div>
+        <div className="absolute inset-0 bg-gradient-to-r from-neutral-950/70 via-neutral-950/18 to-transparent"></div>
+        <div className="absolute inset-0 bg-gradient-to-b from-neutral-950/12 via-transparent to-transparent"></div>
+        <div className="absolute -bottom-20 -left-20 w-80 h-80 bg-brand-coral/10 rounded-full blur-[120px] pointer-events-none"></div>
       </div>
 
       {/* Top Header Row within Hero (Tags on left) */}

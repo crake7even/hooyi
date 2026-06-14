@@ -3,6 +3,24 @@ import { FilterState, Movie } from "../types";
 
 export const ALL_FILTER_VALUE = "All";
 const API_BASE_URL = (((import.meta as any).env?.VITE_API_BASE_URL as string | undefined) || "http://localhost:3001").replace(/\/$/, "");
+const TMDB_IMAGE_BASE_URL = "https://image.tmdb.org/t/p";
+
+function normalizeMovieAssetUrl(url: string): string {
+  const tmdbImageMatch = url.match(/^\/api\/images\/tmdb\/(w500|w780|w1280)(\/.+)$/);
+  if (tmdbImageMatch) {
+    return `${TMDB_IMAGE_BASE_URL}/${tmdbImageMatch[1]}${tmdbImageMatch[2]}`;
+  }
+
+  return url.startsWith("/api/") ? `${API_BASE_URL}${url}` : url;
+}
+
+function normalizeMovie(movie: Movie): Movie {
+  return {
+    ...movie,
+    posterUrl: normalizeMovieAssetUrl(movie.posterUrl),
+    backdropUrl: normalizeMovieAssetUrl(movie.backdropUrl),
+  };
+}
 
 export function getCatalogMovies(): Movie[] {
   return MOVIES_DATABASE;
@@ -15,7 +33,17 @@ export async function fetchCatalogMovies(): Promise<Movie[]> {
   }
 
   const data = await response.json();
-  return Array.isArray(data?.movies) ? data.movies : [];
+  return Array.isArray(data?.movies) ? data.movies.map(normalizeMovie) : [];
+}
+
+export async function fetchCachedCatalogMovies(): Promise<Movie[]> {
+  const response = await fetch("/tmdb-movies-cache.json", { cache: "force-cache" });
+  if (!response.ok) {
+    throw new Error(`Failed to fetch cached movies: ${response.status}`);
+  }
+
+  const data = await response.json();
+  return Array.isArray(data?.movies) ? data.movies.map(normalizeMovie) : [];
 }
 
 export async function searchCatalogMovies(query: string): Promise<Movie[]> {
@@ -28,7 +56,7 @@ export async function searchCatalogMovies(query: string): Promise<Movie[]> {
   }
 
   const data = await response.json();
-  return Array.isArray(data?.movies) ? data.movies : [];
+  return Array.isArray(data?.movies) ? data.movies.map(normalizeMovie) : [];
 }
 
 export function normalizeGenreFilter(genre: string): string {

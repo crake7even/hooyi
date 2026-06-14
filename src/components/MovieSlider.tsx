@@ -1,6 +1,7 @@
 import React, { useRef } from "react";
 import { Play, Eye, Star, ChevronLeft, ChevronRight } from "lucide-react";
 import { Movie } from "../types";
+import { hideBrokenImage } from "./imageFallback";
 
 interface MovieSliderProps {
   movies: Movie[];
@@ -84,6 +85,7 @@ export default function MovieSlider({ movies, fallbackMovies = [], onPlay, onExp
                     alt={movie.title}
                     loading="lazy"
                     referrerPolicy="no-referrer"
+                    onError={hideBrokenImage}
                     className="w-full h-full object-cover group-hover/card:scale-105 transition-transform duration-700 ease-out-quint"
                   />
                   {/* Visual mask */}

@@ -1,6 +1,7 @@
 import React from "react";
-import { X, Play, Heart, Star, Film, Sparkles, User, Calendar, Languages, Tv } from "lucide-react";
-import { Movie } from "../types";
+import { X, Play, Heart, Star, Film, Sparkles, User, Calendar, Languages, Tv, ExternalLink } from "lucide-react";
+import { Movie, WatchPlatform } from "../types";
+import { hideBrokenImage } from "./imageFallback";
 
 interface MovieDetailModalProps {
   movie: Movie | null;
@@ -11,6 +12,17 @@ interface MovieDetailModalProps {
   similarMovies?: Movie[];
   onWatchPlatform?: (movie: Movie) => void;
 }
+
+const getPlatformSearchUrl = (platform: WatchPlatform, title: string) => {
+  const query = encodeURIComponent(title);
+
+  if (platform.type === "netflix") return `https://www.netflix.com/search?q=${query}`;
+  if (platform.type === "prime") return `https://www.primevideo.com/search/ref=atv_nb_sr?phrase=${query}`;
+  if (platform.type === "apple") return `https://tv.apple.com/search?term=${query}`;
+  if (platform.type === "disney") return `https://www.disneyplus.com/search?q=${query}`;
+
+  return null;
+};
 
 export default function MovieDetailModal({
   movie,
@@ -29,17 +41,19 @@ export default function MovieDetailModal({
       <div className="absolute inset-0 bg-radial bg-gradient-to-tr from-brand-bronze-dark/50 via-transparent to-transparent pointer-events-none"></div>
 
       {/* Main Glass Panel Card */}
-      <div className="relative w-full max-w-3xl rounded-[32px] overflow-hidden glass-panel-heavy shadow-2xl z-10 flex flex-col scale-in max-h-[90vh] overflow-y-auto scrollbar-none border border-white/10">
+      <div className="relative w-full max-w-3xl rounded-[32px] overflow-hidden shadow-2xl z-10 flex flex-col scale-in max-h-[90vh] overflow-y-auto cinema-scrollbar border border-white/10 bg-neutral-950/92 backdrop-blur-2xl">
         
-        {/* Absolute Background Blurred backdrop blur behind modal core for luxurious visual styling */}
-        <div className="absolute top-0 inset-x-0 h-44 bg-neutral-900 pointer-events-none overflow-hidden z-0">
+        {/* Unified ambient backdrop */}
+        <div className="absolute inset-0 bg-neutral-950 pointer-events-none overflow-hidden z-0">
           <img
             src={movie.backdropUrl}
             alt={movie.title}
             loading="lazy"
-            className="w-full h-full object-cover opacity-25 blur-md"
+            onError={hideBrokenImage}
+            className="w-full h-full object-cover opacity-18 blur-xl scale-110"
           />
-          <div className="absolute inset-0 bg-gradient-to-t from-neutral-950 to-neutral-950/20"></div>
+          <div className="absolute inset-0 bg-gradient-to-br from-neutral-950/88 via-neutral-950/78 to-neutral-900/70"></div>
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_18%,rgba(226,114,91,0.18),transparent_36%),radial-gradient(circle_at_76%_26%,rgba(120,140,180,0.16),transparent_34%)]"></div>
         </div>
 
         {/* Absolute Exit button */}
@@ -51,7 +65,7 @@ export default function MovieDetailModal({
         </button>
 
         {/* Layout Grid container */}
-        <div className="relative z-10 p-6 md:p-8 flex flex-col md:flex-row gap-6 md:gap-8 mt-4 md:mt-6 overflow-y-auto">
+        <div className="relative z-10 p-6 md:p-8 flex flex-col md:flex-row gap-6 md:gap-8 mt-4 md:mt-6 overflow-y-auto cinema-scrollbar">
           
           {/* Left Column: Vertical cinema poster */}
           <div className="w-[180px] md:w-[220px] shrink-0 mx-auto md:mx-0">
@@ -61,6 +75,7 @@ export default function MovieDetailModal({
                 alt={movie.title}
                 loading="lazy"
                 referrerPolicy="no-referrer"
+                onError={hideBrokenImage}
                 className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700"
               />
               <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end justify-center p-4">
@@ -140,26 +155,48 @@ export default function MovieDetailModal({
               </h4>
               <div className="flex flex-wrap gap-2 mt-1">
                 {movie.platforms && movie.platforms.length > 0 ? (
-                  movie.platforms.map((platform) => (
-                    <button
-                      key={platform.name}
-                      onClick={() => onWatchPlatform?.(movie)}
-                      className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white/[0.03] border border-white/[0.06] hover:bg-white/[0.06] hover:scale-105 active:scale-95 transition-all text-xs font-semibold cursor-pointer"
-                    >
-                      <span className={`w-1.5 h-1.5 rounded-full ${
-                        platform.type === "netflix" ? "bg-red-500" :
-                        platform.type === "prime" ? "bg-blue-400" :
-                        platform.type === "disney" ? "bg-indigo-400" :
-                        platform.type === "apple" ? "bg-zinc-300" :
-                        platform.type === "hbo" ? "bg-purple-400" :
-                        platform.type === "hulu" ? "bg-emerald-400" :
-                        platform.type === "crunchyroll" ? "bg-orange-400" :
-                        "bg-sky-400"
-                      }`} />
-                      <span className="text-white/95">{platform.name}</span>
-                      <span className="text-[9px] text-white/40 font-mono font-medium">({platform.priceInfo})</span>
-                    </button>
-                  ))
+                  movie.platforms.map((platform) => {
+                    const searchUrl = getPlatformSearchUrl(platform, movie.title);
+                    const platformContent = (
+                      <>
+                        <span className={`w-1.5 h-1.5 rounded-full ${
+                          platform.type === "netflix" ? "bg-red-500" :
+                          platform.type === "prime" ? "bg-blue-400" :
+                          platform.type === "disney" ? "bg-indigo-400" :
+                          platform.type === "apple" ? "bg-zinc-300" :
+                          platform.type === "hbo" ? "bg-purple-400" :
+                          platform.type === "hulu" ? "bg-emerald-400" :
+                          platform.type === "crunchyroll" ? "bg-orange-400" :
+                          "bg-sky-400"
+                        }`} />
+                        <span className="text-white/95">{platform.name}</span>
+                        <span className="text-[9px] text-white/40 font-mono font-medium">({platform.priceInfo})</span>
+                        {searchUrl && <ExternalLink size={10} className="text-white/45" />}
+                      </>
+                    );
+
+                    return searchUrl ? (
+                      <a
+                        key={platform.name}
+                        href={searchUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        onClick={() => onWatchPlatform?.(movie)}
+                        className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white/[0.03] border border-white/[0.06] hover:bg-white/[0.06] hover:scale-105 active:scale-95 transition-all text-xs font-semibold cursor-pointer"
+                        title={`在 ${platform.name} 搜索 ${movie.title}`}
+                      >
+                        {platformContent}
+                      </a>
+                    ) : (
+                      <button
+                        key={platform.name}
+                        onClick={() => onWatchPlatform?.(movie)}
+                        className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white/[0.03] border border-white/[0.06] hover:bg-white/[0.06] hover:scale-105 active:scale-95 transition-all text-xs font-semibold cursor-pointer"
+                      >
+                        {platformContent}
+                      </button>
+                    );
+                  })
                 ) : (
                   <span className="text-xs text-white/40 italic">请查询当地院线，流媒体细节待更新。</span>
                 )}
@@ -217,6 +254,7 @@ export default function MovieDetailModal({
                           alt={similar.title}
                           loading="lazy"
                           referrerPolicy="no-referrer"
+                          onError={hideBrokenImage}
                           className="w-full h-full object-cover group-hover/similar:scale-105 transition-transform duration-500"
                         />
                       </div>

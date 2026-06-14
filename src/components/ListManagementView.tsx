@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import { Movie } from "../types";
 import { Trash2, CheckCircle2, Library, MoreHorizontal } from "lucide-react";
+import { hideBrokenImage } from "./imageFallback";
 
 interface ListManagementViewProps {
   title: string;
@@ -191,6 +192,7 @@ export default function ListManagementView({ title, movies, onRemove, onDetails 
                       alt={movie.title}
                       loading="lazy"
                       referrerPolicy="no-referrer"
+                      onError={hideBrokenImage}
                       className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
                     />
                     <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none" />
