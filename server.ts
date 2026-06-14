@@ -562,6 +562,12 @@ async function refreshMoviesFromTmdb(): Promise<Movie[]> {
     .filter((movie, index, all) => all.findIndex((item) => item.id === movie.id) === index)
     .slice(0, 320);
   const movies = await enrichMoviesInBatches(uniqueMovies, genreMap, trendingIds);
+  const fileCached = await readMovieFileCache();
+  if (fileCached?.length && movies.length < Math.floor(fileCached.length * 0.75)) {
+    setCached("tmdb:movies:v2", fileCached, 30 * 60 * 1000);
+    warmMovieImages(fileCached);
+    return fileCached;
+  }
 
   setCached("tmdb:movies:v2", movies, 30 * 60 * 1000);
   await writeMovieFileCache(movies);

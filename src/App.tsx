@@ -64,6 +64,8 @@ const buildFocusMovies = (rankedMovies: Movie[], seed: number, limit = 10) => {
   const firstChinesePool = chineseMovies.slice(0, Math.min(chineseMovies.length, 20));
   const firstMovie = firstChinesePool[Math.floor(seed * firstChinesePool.length) % firstChinesePool.length] || chineseMovies[0];
   const selected = new Map<string, Movie>();
+  const countSelectedChinese = () => Array.from(selected.values()).filter(isChineseMovie).length;
+  const countSelectedForeign = () => Array.from(selected.values()).filter((movie) => !isChineseMovie(movie)).length;
 
   if (firstMovie) {
     selected.set(firstMovie.id, firstMovie);
@@ -75,12 +77,12 @@ const buildFocusMovies = (rankedMovies: Movie[], seed: number, limit = 10) => {
   const targetForeignCount = Math.max(0, limit - targetChineseCount);
 
   for (const movie of rotatedChineseMovies) {
-    if (selected.size >= targetChineseCount) break;
+    if (countSelectedChinese() >= targetChineseCount) break;
     selected.set(movie.id, movie);
   }
 
   for (const movie of rotatedForeignMovies) {
-    if (Array.from(selected.values()).filter((movie) => !isChineseMovie(movie)).length >= targetForeignCount) break;
+    if (countSelectedForeign() >= targetForeignCount) break;
     selected.set(movie.id, movie);
   }
 
@@ -222,7 +224,7 @@ export default function App() {
         }
 
         if (!cancelled) {
-          setCatalogMovies(movies);
+          setCatalogMovies((currentMovies) => mergeMoviesById(currentMovies, movies));
           setCatalogSyncError(null);
           retryTimer = window.setTimeout(() => {
             void loadRealCatalog(attempt + 1);
