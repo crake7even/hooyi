@@ -13,6 +13,12 @@ services:
         value: CN,US
       - key: DEEPSEEK_MODEL
         value: deepseek-chat
+      - key: DEMO_SAFE_MODE
+        value: true
+      - key: VIBE_RATE_LIMIT
+        value: 10
+      - key: VIBE_RATE_WINDOW_MS
+        value: 600000
       - key: CORS_ORIGINS
         sync: false
       - key: TMDB_READ_TOKEN

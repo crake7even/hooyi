@@ -1,8 +1,16 @@
-import express from "express";
+import express, { type NextFunction, type Request, type Response } from "express";
 import dotenv from "dotenv";
 import path from "node:path";
 import fs from "node:fs/promises";
 import { ProxyAgent, setGlobalDispatcher } from "undici";
+import {
+  ClientInputError,
+  SEARCH_QUERY_MAX_LENGTH,
+  createFixedWindowLimiter,
+  fetchWithTimeout,
+  filterDemoSafeMovies,
+  parseVibeRequestBody,
+} from "./server-safety.ts";
 
 dotenv.config({ path: path.resolve(process.cwd(), ".env.local") });
 dotenv.config();
@@ -93,6 +101,7 @@ interface VibeFilters {
 }
 
 const app = express();
+app.set("trust proxy", 1);
 const port = Number(process.env.PORT || 3001);
 const tmdbBaseUrl = "https://api.themoviedb.org/3";
 const tmdbImageBaseUrl = "https://image.tmdb.org/t/p";
@@ -108,6 +117,17 @@ const watchRegions = (process.env.TMDB_WATCH_REGIONS || process.env.TMDB_WATCH_R
 const apiProxyUrl = process.env.API_PROXY_URL;
 const cache = new Map<string, CacheItem<unknown>>();
 let movieRefreshPromise: Promise<Movie[]> | null = null;
+const readPositiveNumber = (value: string | undefined, fallback: number) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+};
+const tmdbTimeoutMs = readPositiveNumber(process.env.TMDB_TIMEOUT_MS, 12_000);
+const imageTimeoutMs = readPositiveNumber(process.env.TMDB_IMAGE_TIMEOUT_MS, 10_000);
+const deepseekTimeoutMs = readPositiveNumber(process.env.DEEPSEEK_TIMEOUT_MS, 25_000);
+const vibeRateLimit = readPositiveNumber(process.env.VIBE_RATE_LIMIT, 10);
+const vibeRateWindowMs = readPositiveNumber(process.env.VIBE_RATE_WINDOW_MS, 10 * 60 * 1000);
+const demoSafeMode = process.env.DEMO_SAFE_MODE !== "false";
+const vibeLimiter = createFixedWindowLimiter(vibeRateLimit, vibeRateWindowMs);
 const allowedOrigins = (process.env.CORS_ORIGINS || process.env.CORS_ORIGIN || "http://localhost:3000")
   .split(",")
   .map((origin) => origin.trim().replace(/\/$/, ""))
@@ -277,7 +297,7 @@ const providerTypeByName: Array<[RegExp, WatchPlatformType]> = [
   [/paramount/i, "paramount"],
 ];
 
-app.use(express.json({ limit: "1mb" }));
+app.use(express.json({ limit: "160kb" }));
 app.use((req, res, next) => {
   const requestOrigin = req.headers.origin?.replace(/\/$/, "");
   const allowOrigin = requestOrigin && allowedOrigins.includes(requestOrigin)
@@ -318,14 +338,17 @@ async function readMovieFileCache(): Promise<Movie[] | null> {
   try {
     const raw = await fs.readFile(movieCacheFile, "utf8");
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed?.movies) ? parsed.movies : null;
+    return Array.isArray(parsed?.movies)
+      ? filterDemoSafeMovies(parsed.movies as Movie[], demoSafeMode)
+      : null;
   } catch {
     return null;
   }
 }
 
 async function writeMovieFileCache(movies: Movie[]) {
-  const payload = JSON.stringify({ updatedAt: new Date().toISOString(), movies }, null, 2);
+  const safeMovies = filterDemoSafeMovies(movies, demoSafeMode);
+  const payload = JSON.stringify({ updatedAt: new Date().toISOString(), movies: safeMovies }, null, 2);
   await fs.mkdir(path.dirname(movieCacheFile), { recursive: true });
   await fs.writeFile(movieCacheFile, payload, "utf8");
   await fs.mkdir(path.dirname(publicMovieCacheFile), { recursive: true });
@@ -337,12 +360,12 @@ async function tmdbFetch<T>(endpoint: string): Promise<T> {
     throw new Error("TMDB_READ_TOKEN is not configured");
   }
 
-  const response = await fetch(`${tmdbBaseUrl}${endpoint}`, {
+  const response = await fetchWithTimeout(`${tmdbBaseUrl}${endpoint}`, {
     headers: {
       Authorization: `Bearer ${tmdbReadToken}`,
       accept: "application/json",
     },
-  });
+  }, tmdbTimeoutMs);
 
   if (!response.ok) {
     throw new Error(`TMDB request failed: ${response.status}`);
@@ -370,7 +393,7 @@ async function cacheTmdbImage(size: string, imagePath: string) {
   const cached = getCached<{ contentType: string; body: Buffer }>(cacheKey);
   if (cached) return cached;
 
-  const response = await fetch(`${tmdbImageBaseUrl}/${size}${imagePath}`);
+  const response = await fetchWithTimeout(`${tmdbImageBaseUrl}/${size}${imagePath}`, {}, imageTimeoutMs);
   if (!response.ok) {
     throw new Error(`TMDB image request failed: ${response.status}`);
   }
@@ -561,7 +584,10 @@ async function refreshMoviesFromTmdb(): Promise<Movie[]> {
   const uniqueMovies = [...coverageSummaries, ...baseSummaries]
     .filter((movie, index, all) => all.findIndex((item) => item.id === movie.id) === index)
     .slice(0, 320);
-  const movies = await enrichMoviesInBatches(uniqueMovies, genreMap, trendingIds);
+  const movies = filterDemoSafeMovies(
+    await enrichMoviesInBatches(uniqueMovies, genreMap, trendingIds),
+    demoSafeMode,
+  );
   const fileCached = await readMovieFileCache();
   if (fileCached?.length && movies.length < Math.floor(fileCached.length * 0.75)) {
     setCached("tmdb:movies:v2", fileCached, 30 * 60 * 1000);
@@ -620,7 +646,10 @@ async function searchMoviesFromTmdb(query: string): Promise<Movie[]> {
   const uniqueMovies = (data.results || [])
     .filter((movie, index, all) => movie?.id && all.findIndex((item) => item.id === movie.id) === index)
     .slice(0, 20);
-  const movies = await Promise.all(uniqueMovies.map((movie) => enrichMovie(movie, genreMap, new Set())));
+  const movies = filterDemoSafeMovies(
+    await Promise.all(uniqueMovies.map((movie) => enrichMovie(movie, genreMap, new Set()))),
+    demoSafeMode,
+  );
 
   setCached(cacheKey, movies, 30 * 60 * 1000);
   return movies;
@@ -1090,6 +1119,23 @@ function parseVibeJson(content: string, movies: Movie[], message: string, filter
   }
 }
 
+function enforceVibeRateLimit(req: Request, res: Response, next: NextFunction) {
+  const clientKey = req.ip || req.socket.remoteAddress || "unknown";
+  const result = vibeLimiter.consume(clientKey);
+
+  res.setHeader("RateLimit-Limit", String(result.limit));
+  res.setHeader("RateLimit-Remaining", String(result.remaining));
+  res.setHeader("RateLimit-Reset", String(Math.ceil(result.resetAt / 1000)));
+
+  if (!result.allowed) {
+    res.setHeader("Retry-After", String(result.retryAfterSeconds));
+    res.status(429).json({ error: "Too many Vibe requests. Please try again later." });
+    return;
+  }
+
+  next();
+}
+
 app.get("/health", (_req, res) => {
   res.json({ ok: true });
 });
@@ -1097,7 +1143,8 @@ app.get("/health", (_req, res) => {
 app.get("/api/images/tmdb/:size/*", async (req, res) => {
   try {
     const size = String(req.params.size || "");
-    const imagePath = `/${String(req.params[0] || "").replace(/^\/+/, "")}`;
+    const wildcardPath = (req.params as Record<string, string | undefined>)["0"];
+    const imagePath = `/${String(wildcardPath || "").replace(/^\/+/, "")}`;
 
     if (!["w500", "w780", "w1280"].includes(size) || imagePath.length <= 1 || imagePath.includes("..")) {
       res.status(400).json({ error: "Invalid TMDB image path" });
@@ -1130,6 +1177,10 @@ app.get("/api/movies", async (_req, res) => {
 app.get("/api/movies/search", async (req, res) => {
   try {
     const query = String(req.query.q || "").trim();
+    if (query.length > SEARCH_QUERY_MAX_LENGTH) {
+      res.status(400).json({ error: `q must be ${SEARCH_QUERY_MAX_LENGTH} characters or fewer` });
+      return;
+    }
     if (query.length < 2) {
       res.json({ movies: [], source: "tmdb-search" });
       return;
@@ -1144,25 +1195,22 @@ app.get("/api/movies/search", async (req, res) => {
   }
 });
 
-app.post("/api/vibe", async (req, res) => {
+app.post("/api/vibe", enforceVibeRateLimit, async (req, res) => {
   try {
     if (!deepseekApiKey) {
-      res.status(500).json({ error: "DEEPSEEK_API_KEY is not configured" });
+      res.status(503).json({ error: "Vibe recommendation is temporarily unavailable" });
       return;
     }
 
-    const message = String(req.body?.message || "").trim();
-    if (!message) {
-      res.status(400).json({ error: "message is required" });
-      return;
-    }
-
-    const requestMovies = Array.isArray(req.body?.movies) ? req.body.movies.slice(0, 60) : [];
-    const filters = (req.body?.filters || {}) as VibeFilters;
+    const parsedRequest = parseVibeRequestBody(req.body);
+    const { message, movies: requestMovies, filters } = parsedRequest;
     const cachedMovies = await getMoviesFromTmdb().catch(() => [] as Movie[]);
-    const moviePool = mergeMoviesById(cachedMovies, requestMovies);
+    const moviePool = filterDemoSafeMovies(
+      mergeMoviesById(cachedMovies, requestMovies),
+      demoSafeMode,
+    );
     const movies = selectVibeCandidateMovies(moviePool, message, filters, 80);
-    const response = await fetch("https://api.deepseek.com/chat/completions", {
+    const response = await fetchWithTimeout("https://api.deepseek.com/chat/completions", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${deepseekApiKey}`,
@@ -1203,7 +1251,7 @@ app.post("/api/vibe", async (req, res) => {
           },
         ],
       }),
-    });
+    }, deepseekTimeoutMs);
 
     if (!response.ok) {
       res.status(response.status).json({ error: `DeepSeek request failed: ${response.status}` });
@@ -1214,8 +1262,14 @@ app.post("/api/vibe", async (req, res) => {
     const content = data?.choices?.[0]?.message?.content || "{}";
     res.json(parseVibeJson(content, movies, message, filters));
   } catch (error) {
-    res.status(502).json({
-      error: error instanceof Error ? error.message : "Failed to call DeepSeek",
+    if (error instanceof ClientInputError) {
+      res.status(error.statusCode).json({ error: error.message });
+      return;
+    }
+
+    const timedOut = error instanceof Error && error.name === "AbortError";
+    res.status(timedOut ? 504 : 502).json({
+      error: timedOut ? "Recommendation service timed out" : "Failed to generate recommendation",
     });
   }
 });

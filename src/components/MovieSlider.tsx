@@ -1,18 +1,24 @@
-import React, { useRef } from "react";
-import { Play, Eye, Star, ChevronLeft, ChevronRight } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Star, ChevronLeft, ChevronRight } from "lucide-react";
 import { Movie } from "../types";
 import { hideBrokenImage } from "./imageFallback";
 
 interface MovieSliderProps {
   movies: Movie[];
   fallbackMovies?: Movie[];
-  onPlay: (movie: Movie) => void;
   onExplore: (movie: Movie) => void;
   disablePadding?: boolean;
 }
 
-export default function MovieSlider({ movies, fallbackMovies = [], onPlay, onExplore, disablePadding }: MovieSliderProps) {
+const MOVIE_BATCH_SIZE = 24;
+
+export default function MovieSlider({ movies, fallbackMovies = [], onExplore, disablePadding }: MovieSliderProps) {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const [visibleCount, setVisibleCount] = useState(MOVIE_BATCH_SIZE);
+
+  useEffect(() => {
+    setVisibleCount(MOVIE_BATCH_SIZE);
+  }, [movies]);
 
   const handlePrev = () => {
     if (scrollContainerRef.current) {
@@ -41,14 +47,20 @@ export default function MovieSlider({ movies, fallbackMovies = [], onPlay, onExp
     displayedMovies = [...displayedMovies, ...extraPool].slice(0, 4);
   }
 
+  const visibleMovies = displayedMovies.slice(0, visibleCount);
+  const hasMoreMovies = visibleCount < displayedMovies.length;
+
   return (
     <div className="flex flex-col gap-4 relative group">
       {/* List Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-4">
         <h3 className="text-white font-bold text-sm uppercase tracking-wider flex items-center gap-2">
           <span>探索目录</span>
           <span className="w-1.5 h-1.5 rounded-full bg-brand-coral"></span>
         </h3>
+        <span className="text-[11px] font-mono text-white/45">
+          {Math.min(visibleCount, displayedMovies.length)} / {displayedMovies.length}
+        </span>
       </div>
 
       {/* Grid Core */}
@@ -61,14 +73,15 @@ export default function MovieSlider({ movies, fallbackMovies = [], onPlay, onExp
         <div className="relative group">
           <div
             ref={scrollContainerRef}
-            className="flex overflow-x-auto gap-3 md:gap-5 snap-x snap-mandatory scroll-smooth scrollbar-hide py-6 -my-6"
+            className="flex overflow-x-auto gap-3 md:gap-5 snap-x snap-mandatory scroll-smooth scrollbar-none py-6 -my-6"
             style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
           >
-            {displayedMovies.map((movie) => (
+            {visibleMovies.map((movie) => (
               <div
                 key={movie.id}
                 role="button"
                 tabIndex={0}
+                aria-label={`查看《${movie.title}》详情`}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" || e.key === " ") {
                     e.preventDefault();
@@ -131,12 +144,16 @@ export default function MovieSlider({ movies, fallbackMovies = [], onPlay, onExp
           <>
             <button
               onClick={handlePrev}
+              aria-label="上一组电影"
+              title="上一组电影"
               className="absolute left-0 md:left-0 top-1/2 -translate-y-1/2 w-10 h-10 md:w-12 md:h-12 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-xl border border-white/40 shadow-lg opacity-0 group-hover:opacity-100 transition-all duration-300 hover:scale-105 z-20 cursor-pointer hidden md:flex items-center justify-center text-white drop-shadow-md"
             >
               <ChevronLeft size={24} className="stroke-[2.5]" />
             </button>
             <button
               onClick={handleNext}
+              aria-label="下一组电影"
+              title="下一组电影"
               className="absolute right-0 md:right-0 top-1/2 -translate-y-1/2 w-10 h-10 md:w-12 md:h-12 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-xl border border-white/40 shadow-lg opacity-0 group-hover:opacity-100 transition-all duration-300 hover:scale-105 z-20 cursor-pointer hidden md:flex items-center justify-center text-white drop-shadow-md"
             >
               <ChevronRight size={24} className="stroke-[2.5]" />
@@ -144,11 +161,15 @@ export default function MovieSlider({ movies, fallbackMovies = [], onPlay, onExp
           </>
         </div>
       )}
-      <style dangerouslySetInnerHTML={{__html: `
-        .scrollbar-hide::-webkit-scrollbar {
-            display: none;
-        }
-      `}} />
+      {hasMoreMovies && (
+        <button
+          type="button"
+          onClick={() => setVisibleCount((count) => count + MOVIE_BATCH_SIZE)}
+          className="min-h-11 self-center rounded-full border border-white/15 px-5 text-xs font-bold text-white/75 transition-colors hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-coral"
+        >
+          再加载 {Math.min(MOVIE_BATCH_SIZE, displayedMovies.length - visibleCount)} 部
+        </button>
+      )}
     </div>
   );
 }

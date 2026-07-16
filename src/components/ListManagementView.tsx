@@ -99,7 +99,7 @@ export default function ListManagementView({ title, movies, onRemove, onDetails 
             <button
               onClick={handleDeleteSelected}
               disabled={selectedIds.size === 0}
-              className="w-9 h-9 flex items-center justify-center rounded-full bg-white/5 hover:bg-red-500/10 border border-white/10 hover:border-red-500/20 transition-colors text-red-500 disabled:text-white/20 disabled:hover:bg-white/5 disabled:hover:border-white/10 disabled:cursor-not-allowed"
+              className="h-11 w-11 flex items-center justify-center rounded-full bg-white/5 hover:bg-red-500/10 border border-white/10 hover:border-red-500/20 transition-colors text-red-500 disabled:text-white/20 disabled:hover:bg-white/5 disabled:hover:border-white/10 disabled:cursor-not-allowed"
               title="删除已选"
               aria-label="删除已选"
             >

@@ -95,7 +95,7 @@ export default function HeroSection({ movie, onDetails, onNext, onPrev, isSwitch
           <button
             onClick={onPrev}
             disabled={isSwitching}
-            className={`w-9 h-9 md:w-10 md:h-10 rounded-xl hover:bg-white/30 flex items-center justify-center text-white drop-shadow-md hover:scale-105 transition-all ${
+            className={`h-11 w-11 rounded-xl hover:bg-white/30 flex items-center justify-center text-white drop-shadow-md hover:scale-105 transition-all ${
               isSwitching ? "cursor-wait opacity-60" : "cursor-pointer"
             }`}
             title="前一部焦点电影"
@@ -105,7 +105,7 @@ export default function HeroSection({ movie, onDetails, onNext, onPrev, isSwitch
           <button
             onClick={onNext}
             disabled={isSwitching}
-            className={`w-9 h-9 md:w-10 md:h-10 rounded-xl hover:bg-white/30 flex items-center justify-center text-white drop-shadow-md hover:scale-105 transition-all ${
+            className={`h-11 w-11 rounded-xl hover:bg-white/30 flex items-center justify-center text-white drop-shadow-md hover:scale-105 transition-all ${
               isSwitching ? "cursor-wait opacity-60" : "cursor-pointer"
             }`}
             title="下一部焦点电影"

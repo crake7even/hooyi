@@ -51,7 +51,7 @@ export async function requestVibeRecommendation(
     },
     body: JSON.stringify({
       message,
-      movies,
+      movies: movies.slice(0, 60),
       filters,
     }),
   });

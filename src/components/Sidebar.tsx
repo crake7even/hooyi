@@ -149,16 +149,17 @@ export default function Sidebar({
         </span>
         <input
           type="text"
+          aria-label="搜索电影、流媒体或流派"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           placeholder="搜索电影、流媒体、流派..."
-          className="w-full h-full pl-11 pr-4 py-3 lg:py-0 bg-white/[0.04] focus:bg-white/[0.08] hover:bg-white/[0.06] border border-white/[0.08] focus:border-brand-coral/40 rounded-2xl text-white text-sm placeholder-white/40 font-medium focus:outline-none transition-all placeholder:font-light"
+          className="w-full h-full pl-11 pr-4 py-3 lg:py-0 bg-white/[0.04] focus:bg-white/[0.08] hover:bg-white/[0.06] border border-white/[0.08] focus:border-brand-coral/40 rounded-2xl text-white text-sm placeholder-white/40 font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-coral transition-all placeholder:font-light"
         />
         {searchQuery && (
           <button
             onClick={() => setSearchQuery("")}
             aria-label="Clear search"
-            className="absolute inset-y-0 right-0 pr-4 flex items-center text-white/40 hover:text-white"
+            className="absolute inset-y-0 right-0 min-w-11 pr-4 flex items-center justify-end text-white/40 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-coral"
           >
             ×
           </button>
@@ -171,7 +172,7 @@ export default function Sidebar({
           <div className="w-full p-4 flex items-center justify-between gap-2">
             <button
               onClick={() => toggleMobileSection("watchlist")}
-              className="flex flex-1 items-center gap-2 text-left min-w-0"
+              className="flex min-h-11 flex-1 items-center gap-2 text-left min-w-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-coral"
               aria-expanded={mobileOpenSections.watchlist}
             >
               <Flame size={18} className="text-brand-coral fill-brand-coral/20 animate-pulse" />
@@ -180,7 +181,7 @@ export default function Sidebar({
             </button>
             <button
               onClick={() => onOpenFullView("待看清单")}
-              className="text-white/50 hover:text-white flex items-center justify-center transition-colors w-7 h-7 rounded-full hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-coral"
+              className="text-white/50 hover:text-white flex items-center justify-center transition-colors w-11 h-11 rounded-full hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-coral"
               title="管理待看清单"
               aria-label="管理待看清单"
             >
@@ -188,7 +189,7 @@ export default function Sidebar({
             </button>
             <button
               onClick={() => toggleMobileSection("watchlist")}
-              className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-coral"
+              className="w-11 h-11 flex items-center justify-center rounded-full hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-coral"
               aria-label={mobileOpenSections.watchlist ? "收起待看清单" : "展开待看清单"}
             >
               <ChevronDown
@@ -210,7 +211,7 @@ export default function Sidebar({
           <div className="w-full p-4 flex items-center justify-between gap-2">
             <button
               onClick={() => toggleMobileSection("history")}
-              className="flex flex-1 items-center gap-2 text-left min-w-0"
+              className="flex min-h-11 flex-1 items-center gap-2 text-left min-w-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-coral"
               aria-expanded={mobileOpenSections.history}
             >
               <CheckCircle size={16} className="text-brand-coral" />
@@ -219,7 +220,7 @@ export default function Sidebar({
             </button>
             <button
               onClick={() => onOpenFullView("观看历史")}
-              className="text-white/50 hover:text-white flex items-center justify-center transition-colors w-7 h-7 rounded-full hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-coral"
+              className="text-white/50 hover:text-white flex items-center justify-center transition-colors w-11 h-11 rounded-full hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-coral"
               title="管理观看历史"
               aria-label="管理观看历史"
             >
@@ -227,7 +228,7 @@ export default function Sidebar({
             </button>
             <button
               onClick={() => toggleMobileSection("history")}
-              className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-coral"
+              className="w-11 h-11 flex items-center justify-center rounded-full hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-coral"
               aria-label={mobileOpenSections.history ? "收起观看历史" : "展开观看历史"}
             >
               <ChevronDown
@@ -255,7 +256,7 @@ export default function Sidebar({
           </div>
           <button 
             onClick={() => onOpenFullView("待看清单")}
-            className="text-white/50 hover:text-white flex items-center justify-center transition-colors w-7 h-7 rounded-full hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-coral"
+            className="text-white/50 hover:text-white flex items-center justify-center transition-colors w-11 h-11 rounded-full hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-coral"
             title="管理待看清单"
             aria-label="管理待看清单"
           >
@@ -277,7 +278,7 @@ export default function Sidebar({
           </div>
           <button 
             onClick={() => onOpenFullView("观看历史")}
-            className="text-white/50 hover:text-white flex items-center justify-center transition-colors w-7 h-7 rounded-full hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-coral"
+            className="text-white/50 hover:text-white flex items-center justify-center transition-colors w-11 h-11 rounded-full hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-coral"
             title="管理观看历史"
             aria-label="管理观看历史"
           >

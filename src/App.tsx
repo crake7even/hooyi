@@ -9,6 +9,7 @@ import VibePrompt from "./components/VibePrompt";
 import ListManagementView from "./components/ListManagementView";
 import VideoPlayerModal from "./components/VideoPlayerModal";
 import MovieDetailModal from "./components/MovieDetailModal";
+import DataAttribution from "./components/DataAttribution";
 import { FilterState, Movie, ContinueWatching } from "./types";
 import {
   ALL_FILTER_VALUE,
@@ -695,7 +696,7 @@ export default function App() {
                     <button
                       key={cat}
                       onClick={() => handleMenuCategoryClick(cat)}
-                      className={`flex-1 py-1.5 lg:py-2 text-sm font-bold rounded-xl transition-all capitalize cursor-pointer shrink-0 text-center ${
+                      className={`flex-1 min-h-11 py-1.5 lg:py-2 text-sm font-bold rounded-xl transition-all capitalize cursor-pointer shrink-0 text-center ${
                         isActive
                           ? "bg-white/10 text-white shadow-sm border border-white/5"
                           : "text-white/60 hover:text-white hover:bg-white/[0.04]"
@@ -713,7 +714,7 @@ export default function App() {
                 {/* Day / Night Theme Toggle */}
                 <button
                   onClick={() => setThemeMode(themeMode === "night" ? "day" : "night")}
-                  className="p-2.5 rounded-xl bg-white/[0.02] border border-white/[0.06] hover:bg-white/[0.08] hover:border-white/[0.15] text-white/80 hover:text-white transition-all cursor-pointer active:scale-95 flex items-center justify-center relative overflow-hidden group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-coral"
+                  className="h-11 w-11 rounded-xl bg-white/[0.02] border border-white/[0.06] hover:bg-white/[0.08] hover:border-white/[0.15] text-white/80 hover:text-white transition-all cursor-pointer active:scale-95 flex items-center justify-center relative overflow-hidden group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-coral"
                   title={themeMode === "night" ? "Switch to Day Mode" : "Switch to Night Mode"}
                   aria-label={themeMode === "night" ? "Switch to Day Mode" : "Switch to Night Mode"}
                 >
@@ -771,7 +772,7 @@ export default function App() {
                     aria-label="Contact developer"
                     aria-haspopup="true"
                     aria-expanded={showProfileDropdown}
-                    className="flex h-10 w-10 items-center justify-center bg-white/[0.02] hover:bg-white/[0.06] border border-white/[0.06] rounded-xl transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-coral"
+                    className="flex h-11 w-11 items-center justify-center bg-white/[0.02] hover:bg-white/[0.06] border border-white/[0.06] rounded-xl transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-coral"
                   >
                     <div className="flex items-center justify-center">
                       <Mail size={17} strokeWidth={1.9} className="text-white/75" />
@@ -868,11 +869,12 @@ export default function App() {
                 <MovieSlider
                   movies={filteredAndSortedMovies}
                   fallbackMovies={catalogMovies}
-                  onPlay={handlePlayMovieTrailer}
                   onExplore={handleOpenDetailModal}
                 />
               </>
             )}
+
+            <DataAttribution />
 
           </main>
 
