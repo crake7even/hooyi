@@ -10,7 +10,7 @@
   [![Live Demo](https://img.shields.io/badge/Live_Demo-Netlify-00C7B7?logo=netlify&logoColor=white)](https://hooyi.netlify.app/)
 </div>
 
-![Hooyi desktop preview](docs/screenshots/hooyi-desktop.png)
+
 
 ## 在线体验
 
