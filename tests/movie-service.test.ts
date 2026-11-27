@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { filterAndSortMovies, parseLikesCount } from "../src/api/movieService";
+import { filterAndSortMovies, getSimilarMovies, parseLikesCount } from "../src/api/movieService";
 import type { FilterState, Movie } from "../src/types";
 
 const baseMovie: Movie = {
@@ -52,4 +52,17 @@ test("personalized genre score affects popular ordering", () => {
   const comedy = { ...baseMovie, id: "2", genres: ["喜剧"], likesCount: "1" };
   const result = filterAndSortMovies([baseMovie, comedy], baseFilters, { 喜剧: 500 });
   assert.equal(result[0].id, "2");
+});
+
+test("getSimilarMovies ranks by shared genre count, then rating, excluding itself", () => {
+  const source = { ...baseMovie, id: "src", genres: ["动画", "剧情", "奇幻"], rating: 9 };
+  const oneShared = { ...baseMovie, id: "one", genres: ["动画", "喜剧"], rating: 9.5 };
+  const twoSharedLow = { ...baseMovie, id: "two-low", genres: ["动画", "剧情"], rating: 6 };
+  const twoSharedHigh = { ...baseMovie, id: "two-high", genres: ["剧情", "奇幻"], rating: 8.5 };
+  const unrelated = { ...baseMovie, id: "none", genres: ["恐怖"], rating: 10 };
+
+  const result = getSimilarMovies(source, [oneShared, source, unrelated, twoSharedLow, twoSharedHigh]);
+
+  assert.deepEqual(result.map((movie) => movie.id), ["two-high", "two-low", "one"]);
+  assert.ok(!result.some((movie) => movie.id === source.id));
 });

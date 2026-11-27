@@ -170,6 +170,35 @@ export function findContinueWatchingMovie(watchItemId: string, movies: Movie[]):
 
 export function getSimilarMovies(movie: Movie, movies: Movie[], limit = 3): Movie[] {
   return movies
-    .filter((item) => item.id !== movie.id && item.genres.some((genre) => movie.genres.includes(genre)))
-    .slice(0, limit);
+    .filter((item) => item.id !== movie.id)
+    .map((item, index) => ({
+      item,
+      index,
+      sharedGenres: item.genres.filter((genre) => movie.genres.includes(genre)).length,
+    }))
+    .filter(({ sharedGenres }) => sharedGenres > 0)
+    .sort((a, b) => b.sharedGenres - a.sharedGenres || b.item.rating - a.item.rating || a.index - b.index)
+    .slice(0, limit)
+    .map(({ item }) => item);
+}
+
+const LANGUAGE_LABELS: Record<string, string> = {
+  zh: "中文",
+  cn: "粤语",
+  en: "英语",
+  ja: "日语",
+  ko: "韩语",
+  fr: "法语",
+  de: "德语",
+  es: "西班牙语",
+  it: "意大利语",
+  ru: "俄语",
+  pt: "葡萄牙语",
+  hi: "印地语",
+  th: "泰语",
+};
+
+export function getLanguageLabel(code: string): string {
+  if (!code) return "未知";
+  return LANGUAGE_LABELS[code.toLowerCase()] || code.toUpperCase();
 }

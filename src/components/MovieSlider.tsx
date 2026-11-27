@@ -18,6 +18,7 @@ export default function MovieSlider({ movies, fallbackMovies = [], onExplore, di
 
   useEffect(() => {
     setVisibleCount(MOVIE_BATCH_SIZE);
+    scrollContainerRef.current?.scrollTo({ left: 0 });
   }, [movies]);
 
   const handlePrev = () => {
@@ -26,6 +27,15 @@ export default function MovieSlider({ movies, fallbackMovies = [], onExplore, di
         left: -scrollContainerRef.current.clientWidth * 0.8,
         behavior: "smooth",
       });
+    }
+  };
+
+  const loadMoreIfNearEnd = () => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    const remaining = container.scrollWidth - container.scrollLeft - container.clientWidth;
+    if (remaining < container.clientWidth * 1.5) {
+      setVisibleCount((count) => (count < displayedMovies.length ? count + MOVIE_BATCH_SIZE : count));
     }
   };
 
@@ -48,19 +58,15 @@ export default function MovieSlider({ movies, fallbackMovies = [], onExplore, di
   }
 
   const visibleMovies = displayedMovies.slice(0, visibleCount);
-  const hasMoreMovies = visibleCount < displayedMovies.length;
 
   return (
-    <div className="flex flex-col gap-4 relative group">
+    <div className="flex flex-col gap-4 relative group fit:flex-1 fit:min-h-0">
       {/* List Header */}
       <div className="flex items-center justify-between gap-4">
         <h3 className="text-white font-bold text-sm uppercase tracking-wider flex items-center gap-2">
           <span>探索目录</span>
           <span className="w-1.5 h-1.5 rounded-full bg-brand-coral"></span>
         </h3>
-        <span className="text-[11px] font-mono text-white/45">
-          {Math.min(visibleCount, displayedMovies.length)} / {displayedMovies.length}
-        </span>
       </div>
 
       {/* Grid Core */}
@@ -70,10 +76,11 @@ export default function MovieSlider({ movies, fallbackMovies = [], onExplore, di
           <p className="text-xs text-white/20">请尝试重置或放宽过滤条件。</p>
         </div>
       ) : (
-        <div className="relative group">
+        <div className="relative group fit:flex-1 fit:min-h-0">
           <div
             ref={scrollContainerRef}
-            className="flex overflow-x-auto gap-3 md:gap-5 snap-x snap-mandatory scroll-smooth scrollbar-none py-6 -my-6"
+            onScroll={loadMoreIfNearEnd}
+            className="flex overflow-x-auto fit:h-[calc(100%+3rem)] gap-3 md:gap-5 snap-x snap-mandatory scroll-smooth scrollbar-none py-6 -my-6"
             style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
           >
             {visibleMovies.map((movie) => (
@@ -89,7 +96,7 @@ export default function MovieSlider({ movies, fallbackMovies = [], onExplore, di
                   }
                 }}
                 onClick={() => onExplore(movie)}
-                className="w-[calc(100%-1.5rem)] sm:w-[calc((100%-1*0.75rem)/2)] md:w-[calc((100%-2*1.25rem)/3)] lg:w-[calc((100%-3*1.25rem)/4)] shrink-0 snap-center md:snap-start relative group/card rounded-[24px] overflow-hidden glass-card aspect-[2/3] select-none flex flex-col justify-end cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-coral z-10"
+                className="w-[calc(100%-1.5rem)] sm:w-[calc((100%-1*0.75rem)/2)] md:w-[calc((100%-2*1.25rem)/3)] lg:w-[calc((100%-3*1.25rem)/4)] fit:!w-auto fit:h-full shrink-0 snap-center md:snap-start relative group/card rounded-[24px] overflow-hidden glass-card aspect-[2/3] select-none flex flex-col justify-end cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-coral z-10"
               >
                 {/* Poster image background */}
                 <div className="absolute inset-0 bg-neutral-900 z-0">
@@ -160,15 +167,6 @@ export default function MovieSlider({ movies, fallbackMovies = [], onExplore, di
             </button>
           </>
         </div>
-      )}
-      {hasMoreMovies && (
-        <button
-          type="button"
-          onClick={() => setVisibleCount((count) => count + MOVIE_BATCH_SIZE)}
-          className="min-h-11 self-center rounded-full border border-white/15 px-5 text-xs font-bold text-white/75 transition-colors hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-coral"
-        >
-          再加载 {Math.min(MOVIE_BATCH_SIZE, displayedMovies.length - visibleCount)} 部
-        </button>
       )}
     </div>
   );

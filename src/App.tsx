@@ -1,20 +1,18 @@
-import React, { useEffect, useRef, useState, useMemo } from "react";
-import { Bell, Flame, Check, Info, Library, Sparkles, Filter, RefreshCw, Star, Play, Sun, Moon, Mail } from "lucide-react";
-import Sidebar from "./components/Sidebar";
-import FilterPanel from "./components/FilterPanel";
+import React, { useCallback, useEffect, useRef, useState, useMemo } from "react";
+import { Sun, Moon, Mail } from "lucide-react";
+import SidebarComponent, { SearchBox } from "./components/Sidebar";
+import FilterPanel, { FilterToggleButton, countActiveFilters } from "./components/FilterPanel";
 import HeroSection from "./components/HeroSection";
 import MovieSlider from "./components/MovieSlider";
 import TinderSwipeDeck from "./components/TinderSwipeDeck";
 import VibePrompt from "./components/VibePrompt";
 import ListManagementView from "./components/ListManagementView";
-import VideoPlayerModal from "./components/VideoPlayerModal";
 import MovieDetailModal from "./components/MovieDetailModal";
 import DataAttribution from "./components/DataAttribution";
-import { FilterState, Movie, ContinueWatching } from "./types";
+import { FilterState, Movie, WatchPlatformType } from "./types";
 import {
   ALL_FILTER_VALUE,
   filterAndSortMovies,
-  findContinueWatchingMovie,
   findMovieById,
   fetchCachedCatalogMovies,
   fetchCatalogMovies,
@@ -32,14 +30,10 @@ import {
   upsertWatchlistItem,
 } from "./api/userDataService";
 
-interface NotificationItem {
-  id: string;
-  text: string;
-  time: string;
-  unread: boolean;
-}
-
 type LoadingPhase = "connecting" | "preloading" | "ready";
+
+// Memoized so swipe-deck interactions do not re-render the sidebar unless its own data changes.
+const Sidebar = React.memo(SidebarComponent);
 
 const hasWatchProviders = (movie: Movie) => Boolean(movie.platforms?.length);
 
@@ -193,7 +187,7 @@ export default function App() {
   const focusSeedRef = useRef(Math.random());
   const [catalogMovies, setCatalogMovies] = useState<Movie[]>(() => getCatalogMovies());
   const [searchResultMovies, setSearchResultMovies] = useState<Movie[]>([]);
-  const [catalogSyncError, setCatalogSyncError] = useState<string | null>(null);
+  const [, setCatalogSyncError] = useState<string | null>(null);
   const currentUser = useMemo<{ id: string; email?: string } | null>(() => null, []);
   const loadedUserDataRef = useRef<string | null>(null);
   const setUserDataStatus = (_status: string) => undefined;
@@ -256,7 +250,7 @@ export default function App() {
   const [filters, setFilters] = useState<FilterState>({
     searchQuery: "",
     selectedGenre: ALL_FILTER_VALUE,
-    yearRange: [2000, 2026],
+    yearRange: [1950, 2026],
     minRating: 0,
     language: "All",
     sortBy: "popular",
@@ -296,7 +290,6 @@ export default function App() {
   const [swipedMovieIds, setSwipedMovieIds] = useState<string[]>([]);
 
   // Playback / Detail Overlay States
-  const [activeVideo, setActiveVideo] = useState<{ url: string; title: string; movieTitle: string } | null>(null);
   const [activeDetailMovie, setActiveDetailMovie] = useState<Movie | null>(null);
   
   // Watch history & Genre Preferences (LocalStorage)
@@ -401,6 +394,45 @@ export default function App() {
       });
   }, [currentUser, catalogMovies]);
 
+  // Snapshot taken before the latest swipe action so it can be undone exactly.
+  const swipeUndoRef = useRef<{ movieId: string; genreScores: Record<string, number>; watchlistIds: string[]; swipedMovieIds: string[] } | null>(null);
+  const genreScoresRef = useRef(genreScores);
+  genreScoresRef.current = genreScores;
+  const watchlistIdsRef = useRef(watchlistIds);
+  watchlistIdsRef.current = watchlistIds;
+  const swipedMovieIdsRef = useRef(swipedMovieIds);
+  swipedMovieIdsRef.current = swipedMovieIds;
+
+  const rememberSwipeSnapshot = (movie: Movie) => {
+    swipeUndoRef.current = {
+      movieId: movie.id,
+      genreScores: genreScoresRef.current,
+      watchlistIds: watchlistIdsRef.current,
+      swipedMovieIds: swipedMovieIdsRef.current,
+    };
+  };
+
+  const handleSwipeAddToWatchlist = (movie: Movie) => {
+    rememberSwipeSnapshot(movie);
+    handleAddToWatchlist(movie);
+  };
+
+  const handleUndoSwipe = (movie: Movie) => {
+    const snapshot = swipeUndoRef.current;
+    if (!snapshot || snapshot.movieId !== movie.id) return;
+    swipeUndoRef.current = null;
+
+    const removedFromWatchlist = !snapshot.watchlistIds.includes(movie.id) && watchlistIdsRef.current.includes(movie.id);
+    setGenreScores(snapshot.genreScores);
+    setWatchlistIds(snapshot.watchlistIds);
+    setSwipedMovieIds(snapshot.swipedMovieIds);
+    localStorage.setItem("movieApp_genres", JSON.stringify(snapshot.genreScores));
+    localStorage.setItem("movieApp_watchlist", JSON.stringify(snapshot.watchlistIds));
+    if (currentUser && removedFromWatchlist) {
+      void removeWatchlistItems(currentUser.id, [movie.id]).catch(() => undefined);
+    }
+  };
+
   const handleAddToWatchlist = (movie: Movie) => {
     setSwipedMovieIds((prev) => prev.includes(movie.id) ? prev : [...prev, movie.id]);
     trackGenreScore(movie, 8, "add_watchlist");
@@ -416,6 +448,7 @@ export default function App() {
   };
 
   const handleDismissSwipeMovie = (movie: Movie) => {
+    rememberSwipeSnapshot(movie);
     setSwipedMovieIds((prev) => prev.includes(movie.id) ? prev : [...prev, movie.id]);
     trackGenreScore(movie, -5, "dismiss");
   };
@@ -452,16 +485,6 @@ export default function App() {
   const [isFeaturedSwitching, setIsFeaturedSwitching] = useState(false);
   const currentFeatured = trendMovies[featuredIndex] || catalogMovies[0];
 
-  // Simulated notification list
-  const [notifications, setNotifications] = useState<NotificationItem[]>([
-    { id: "1", text: "新片上映：DC 宇宙《闪电侠（2023）》已准备好 4K 流媒体播放！", time: "5分钟前", unread: true },
-    { id: "2", text: "继续观看：你上次观看的《暗黑 第3季》进度已到 75%。", time: "2小时前", unread: true },
-    { id: "3", text: "宫崎骏经典《千与千寻》推出高清重置日语原音版本。", time: "1天前", unread: false },
-    { id: "4", text: "串流质量已自动升级至 1080p 超高码率。", time: "2天前", unread: false },
-  ]);
-
-  const unreadCount = notifications.filter(n => n.unread).length;
-
   const searchableMovies = useMemo(() => {
     return filters.searchQuery.trim().length >= 2
       ? mergeMoviesById(catalogMovies, searchResultMovies)
@@ -477,7 +500,13 @@ export default function App() {
     return catalogMovies.filter(hasWatchProviders);
   }, [catalogMovies]);
 
+  const [swipeRound, setSwipeRound] = useState(0);
+
+  // Ranked once per round (and when the catalog itself changes); swipes inside a round do not reshuffle it.
   const swipeCandidateMovies = useMemo(() => {
+    const genreScores = genreScoresRef.current;
+    const watchlistIds = watchlistIdsRef.current;
+    const swipedMovieIds = swipedMovieIdsRef.current;
     const sourceMovies = watchableCatalogMovies.length > 0 ? watchableCatalogMovies : catalogMovies;
     const baseMovies = sourceMovies.filter((movie) => !swipedMovieIds.includes(movie.id));
     const availableMovies = baseMovies.length > 0 ? baseMovies : sourceMovies;
@@ -493,28 +522,45 @@ export default function App() {
       })
       .sort((a, b) => b.score - a.score)
       .map((item) => item.movie);
-  }, [watchableCatalogMovies, catalogMovies, genreScores, watchlistIds, swipedMovieIds]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [watchableCatalogMovies, catalogMovies, swipeRound]);
 
   const vibeCandidateMovies = watchableCatalogMovies.length > 0 ? watchableCatalogMovies : catalogMovies;
 
-  const swipeDeckResetKey = useMemo(
-    () => catalogMovies.map((movie) => movie.id).join("|"),
-    [catalogMovies],
-  );
+  const swipeDeckResetKey = `round-${swipeRound}`;
 
   const activeSimilarMovies = useMemo(() => {
     return activeDetailMovie ? getSimilarMovies(activeDetailMovie, searchableMovies) : [];
   }, [activeDetailMovie, searchableMovies]);
 
-  // Handle Carousel Pagination limits
-  const preloadBackdrop = (movie: Movie) => {
-    return new Promise<void>((resolve) => {
-      const image = new Image();
-      image.onload = () => resolve();
-      image.onerror = () => resolve();
-      image.src = movie.backdropUrl;
-    });
-  };
+  // Hero backdrops: decode the neighbours ahead of time so switching never waits on the network.
+  const loadedBackdropsRef = useRef(new Map<string, Promise<void>>());
+  const preloadBackdrop = useCallback((movie: Movie) => {
+    const cache = loadedBackdropsRef.current;
+    let pending = cache.get(movie.backdropUrl);
+    if (!pending) {
+      pending = new Promise<void>((resolve) => {
+        const image = new Image();
+        image.decoding = "async";
+        image.onload = () => {
+          void (image.decode ? image.decode().catch(() => undefined) : Promise.resolve()).then(() => resolve());
+        };
+        image.onerror = () => resolve();
+        image.src = movie.backdropUrl;
+      });
+      cache.set(movie.backdropUrl, pending);
+    }
+    return pending;
+  }, []);
+
+  useEffect(() => {
+    const total = trendMovies.length;
+    if (total === 0) return;
+    for (const offset of [1, -1, 2]) {
+      const movie = trendMovies[(featuredIndex + offset + total) % total];
+      if (movie) void preloadBackdrop(movie);
+    }
+  }, [trendMovies, featuredIndex, preloadBackdrop]);
 
   const switchFeaturedMovie = async (getNextIndex: (current: number, total: number) => number) => {
     const total = Math.max(trendMovies.length, 1);
@@ -523,8 +569,9 @@ export default function App() {
 
     if (!nextMovie || isFeaturedSwitching) return;
 
+    // Already decoded (the usual case): switch on this frame. Otherwise wait briefly, never more than 300ms.
     setIsFeaturedSwitching(true);
-    await preloadBackdrop(nextMovie);
+    await Promise.race([preloadBackdrop(nextMovie), new Promise((resolve) => window.setTimeout(resolve, 300))]);
     setFeaturedIndex(nextIndex);
     setIsFeaturedSwitching(false);
   };
@@ -538,57 +585,25 @@ export default function App() {
   };
 
   // Unified dynamic filters setter Helper
-  const handleUpdateFilters = (newFilters: Partial<FilterState>) => {
+  const handleUpdateFilters = useCallback((newFilters: Partial<FilterState>) => {
     setFilters((prev) => ({ ...prev, ...newFilters }));
-  };
+  }, []);
+  const handleSidebarSearch = useCallback((q: string) => handleUpdateFilters({ searchQuery: q }), [handleUpdateFilters]);
+  const handleSidebarPlatform = useCallback((platform: WatchPlatformType | null) => handleUpdateFilters({ selectedPlatform: platform }), [handleUpdateFilters]);
+  const handleSidebarDetails = useCallback((movie: Movie) => setActiveDetailMovie(movie), []);
+  const handleSidebarFullView = useCallback((view: string) => setActiveTab(view), []);
+  const handleSidebarDiscover = useCallback(() => setActiveTab("随心一刷"), []);
 
   const handleResetFilters = () => {
     setFilters({
       searchQuery: "",
       selectedGenre: ALL_FILTER_VALUE,
-      yearRange: [2000, 2026],
+      yearRange: [1950, 2026],
       minRating: 0,
       language: ALL_FILTER_VALUE,
       sortBy: "popular",
       selectedPlatform: null,
     });
-  };
-
-  // Launch modal player for arbitrary clips
-  const handlePlayVideo = (url: string, title: string, movieTitle: string) => {
-    setActiveVideo({ url, title, movieTitle });
-  };
-
-  // Play clip direct from movie object wrapper
-  const handlePlayMovieTrailer = (movie: Movie) => {
-    trackGenreScore(movie, 2, "play_trailer");
-    setActiveDetailMovie(null); // Close the detail modal if it's open
-    setActiveVideo({
-      url: movie.trailerUrl,
-      title: `${movie.title} - Official Trailer Preview`,
-      movieTitle: movie.title,
-    });
-  };
-
-  // Resume playback event trigger
-  const handleSelectContinueWatching = (watchItem: ContinueWatching) => {
-    const parentMovie = findContinueWatchingMovie(watchItem.id, catalogMovies);
-    const targetUrl = parentMovie ? parentMovie.trailerUrl : "https://assets.mixkit.co/videos/preview/mixkit-thick-fog-moving-through-forest-trees-42289-large.mp4";
-    
-    if (parentMovie) {
-      trackMovieInteraction(parentMovie);
-    }
-    
-    setActiveVideo({
-      url: targetUrl,
-      title: `Resuming: ${watchItem.title} (${watchItem.episodeInfo})`,
-      movieTitle: watchItem.title,
-    });
-
-    // Mark associated alert as read
-    setNotifications(prev =>
-      prev.map(n => n.text.includes(watchItem.title) ? { ...n, unread: false } : n)
-    );
   };
 
   // Quick header menu tabs that updates filters dynamically
@@ -607,31 +622,26 @@ export default function App() {
     }
   };
 
-  // Read all notifications simulation trigger
-  const handleMarkAllRead = () => {
-    setNotifications(prev => prev.map(n => ({ ...n, unread: false })));
-  };
-
   return (
-    <div className={`relative min-h-screen text-white overflow-x-hidden font-sans p-4 md:p-6 select-none flex items-start lg:items-center justify-center`}>
+    <div className={`relative min-h-screen text-white overflow-x-hidden font-sans p-4 md:p-6 fit:p-5 fit:h-svh select-none flex items-start lg:items-center justify-center`}>
       {/* Background Layers for smooth transition */}
       <div className={`fixed inset-0 bg-gradient-to-b from-[#141320] via-[#4b312b] to-[#eb711f] transition-opacity duration-1000 -z-20 ${themeMode === "night" ? "opacity-100" : "opacity-0"}`} />
       <div className={`fixed inset-0 bg-gradient-to-b from-[#32448f] via-[#8195d2] to-[#f3cae8] transition-opacity duration-1000 -z-20 ${themeMode === "day" ? "opacity-100" : "opacity-0"}`} />
       
       {/* Absolute floating cinematic decorative projection lamps */}
-      <div className={`absolute top-[5%] right-[10%] w-[500px] h-[500px] rounded-full blur-[160px] pointer-events-none animate-pulse-slow transition-all duration-1000 -z-10 ${
+      <div className={`absolute top-[5%] right-[10%] w-[500px] h-[500px] rounded-full blur-[160px] pointer-events-none transition-all duration-1000 -z-10 ${
         themeMode === "night" ? "bg-[#eb711f]/15" : "bg-[#f3cae8]/30"
       }`}></div>
       <div className={`absolute top-[20%] left-[5%] w-96 h-96 rounded-full blur-[140px] pointer-events-none transition-all duration-1000 -z-10 ${
         themeMode === "night" ? "bg-[#4b312b]/30" : "bg-[#8195d2]/20"
       }`}></div>
-      <div className={`absolute bottom-[15%] right-[15%] w-[400px] h-[400px] rounded-full blur-[150px] pointer-events-none animate-pulse-slow transition-all duration-1000 -z-10 ${
+      <div className={`absolute bottom-[15%] right-[15%] w-[400px] h-[400px] rounded-full blur-[150px] pointer-events-none transition-all duration-1000 -z-10 ${
         themeMode === "night" ? "bg-[#eb711f]/10" : "bg-[#32448f]/20"
       }`}></div>
  
       {/* Main glass frame boundaries wrapper */}
       <div 
-        className="relative w-full max-w-7xl mx-auto my-auto flex flex-col gap-4 p-4 md:p-5 rounded-[36px] z-10 transition-all duration-1000"
+        className="relative w-full max-w-7xl mx-auto my-auto fit:h-full fit:my-0 flex flex-col gap-4 p-4 md:p-5 rounded-[36px] z-10 transition-all duration-1000"
         style={{
           boxShadow: themeMode === "night" 
             ? "0 30px 100px rgba(0, 0, 0, 0.3), inset 1px 1px 1.5px 0 rgba(255, 255, 255, 0.45)" 
@@ -644,20 +654,14 @@ export default function App() {
           border: "1px solid rgba(255, 255, 255, 0.22)"
         }}
       >
-        {false && catalogSyncError && (
-          <div className="rounded-2xl border border-amber-300/20 bg-amber-300/10 px-4 py-2 text-xs font-semibold text-amber-50/80">
-            正在使用本地片单，在线电影数据稍后会自动同步。
-          </div>
-        )}
-        
         {/* Brand Header */}
-        <div className="flex flex-col md:flex-row items-start md:items-center justify-between border-b border-white/[0.05] pb-4 mb-2 gap-3 relative">
+        <div className="lg:hidden flex flex-col md:flex-row items-start md:items-center justify-between border-b border-white/[0.05] pb-4 mb-2 gap-3 relative">
           <div className="text-left">
             <h1 className="text-white font-serif font-extrabold text-3xl md:text-4xl tracking-tight leading-none">
               好影
             </h1>
-            <p className="text-white/40 text-xs md:text-sm mt-2 leading-relaxed tracking-wide">
-              只看好影片  您的院线与流媒体直通指南
+            <p className={`${themeMode === "day" ? "text-white/85" : "text-white/40"} text-xs md:text-sm mt-2 leading-relaxed tracking-wide`}>
+              院线与流媒体直通指南
             </p>
           </div>
           
@@ -665,28 +669,39 @@ export default function App() {
         </div>
         
         {/* Master Row Panel containing left drawer sidebar and right widescreen monitor area */}
-        <div className="flex flex-col lg:flex-row gap-6 items-stretch">
+        <div className="flex flex-col lg:flex-row gap-6 items-stretch fit:flex-1 fit:min-h-0">
           
           {/* LEFT SIDEBAR PANEL: Built dynamically with widgets */}
           <Sidebar
             searchQuery={filters.searchQuery}
-            setSearchQuery={(q) => handleUpdateFilters({ searchQuery: q })}
-            onPlayTrailer={handlePlayVideo}
+            setSearchQuery={handleSidebarSearch}
+            themeMode={themeMode}
             selectedPlatform={filters.selectedPlatform || null}
-            onSelectPlatform={(platform) => handleUpdateFilters({ selectedPlatform: platform })}
-            onDetails={(movie) => setActiveDetailMovie(movie)}
+            onSelectPlatform={handleSidebarPlatform}
+            onDetails={handleSidebarDetails}
             movies={searchableMovies}
             watchlist={watchlist}
             watchHistory={watchHistoryMovies}
-            onOpenFullView={(view) => setActiveTab(view)}
+            onOpenFullView={handleSidebarFullView}
+            onDiscover={handleSidebarDiscover}
+            brand={
+              <div className="text-left">
+                <h1 className="text-white font-serif font-extrabold text-3xl tracking-tight leading-none">好影</h1>
+                <p className={`${themeMode === "day" ? "text-white/85" : "text-white/45"} text-[11px] mt-1.5 tracking-wide`}>院线与流媒体直通指南</p>
+              </div>
+            }
           />
 
           {/* RIGHT MAIN SHOWCASE: Wide dynamic monitor display area */}
-          <main className="flex-1 w-full flex flex-col gap-5 min-w-0 min-h-[650px] lg:min-h-[750px]">
+          <main className="flex-1 w-full flex flex-col gap-5 min-w-0 min-h-[650px] lg:min-h-[750px] fit:!min-h-0 fit:overflow-y-auto fit:scrollbar-none">
             
             {/* Top Navigation Row */}
-            <header className="grid grid-cols-1 lg:grid-cols-[1fr_minmax(320px,520px)_1fr] items-center gap-4 py-2 lg:py-0 lg:h-[44px] relative z-30 w-full shrink-0">
+            <header className="grid grid-cols-1 lg:grid-cols-[minmax(200px,1fr)_minmax(300px,440px)_auto] items-center gap-4 py-2 lg:py-0 lg:h-[44px] relative z-30 w-full shrink-0">
               
+              <div className="hidden lg:block lg:col-start-1 lg:row-start-1 lg:h-[44px] min-w-0">
+                <SearchBox value={filters.searchQuery} onChange={handleSidebarSearch} />
+              </div>
+
               {/* Category Pill Buttons */}
               <nav className="flex items-stretch gap-2 p-1 bg-white/[0.02] border border-white/[0.04] backdrop-blur-md rounded-2xl w-full overflow-hidden lg:col-start-2">
                 {menuCategories.map((cat) => {
@@ -710,6 +725,12 @@ export default function App() {
 
               {/* Utility actions side elements */}
               <div className="flex items-center justify-end gap-3 w-full lg:w-auto relative z-20 lg:col-start-3">
+
+                <FilterToggleButton
+                  isOpen={isFilterPanelOpen}
+                  onToggle={() => setIsFilterPanelOpen((open) => !open)}
+                  activeCount={countActiveFilters(filters)}
+                />
 
                 {/* Day / Night Theme Toggle */}
                 <button
@@ -740,28 +761,7 @@ export default function App() {
                   </div>
                 </button>
 
-                <button
-                  type="button"
-                  onClick={() => undefined}
-                  className="hidden"
-                >
-                  <Mail size={14} />
-                  <span className="hidden sm:inline max-w-[140px] truncate">
-                    {currentUser?.email || "登录保存偏好"}
-                  </span>
-                </button>
-
-                {false && currentUser && (
-                  <button
-                    type="button"
-                    onClick={() => undefined}
-                    className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/[0.06] bg-white/[0.02] text-white/65 transition-all hover:bg-white/[0.08] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-coral"
-                    title="退出登录"
-                    aria-label="退出登录"
-                  >
-                    <span />
-                  </button>
-                )}
+                <DataAttribution themeMode={themeMode} variant="icon" />
 
                 {/* Profile menu drop toggle */}
                 <div className="relative">
@@ -777,11 +777,6 @@ export default function App() {
                     <div className="flex items-center justify-center">
                       <Mail size={17} strokeWidth={1.9} className="text-white/75" />
                     </div>
-                    <div className="hidden">
-                      <span className="text-white text-[11px] font-bold tracking-tight">开发者</span>
-                      <span className="text-white/40 text-[9px] font-mono">@yuzhaodai</span>
-                    </div>
-                    {false && <span />}
                   </button>
 
                   {showProfileDropdown && (
@@ -790,19 +785,6 @@ export default function App() {
                         <p className="text-[10px] text-white/50 mb-1.5">
                           {"\u8054\u7cfb\u5f00\u53d1\u8005 / \u610f\u89c1\u53cd\u9988"}
                         </p>
-                        <p className="text-xs text-white font-bold tracking-tight select-text selection:bg-brand-coral/30 cursor-text break-all">
-                          yuzhaodai@gmail.com
-                        </p>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Profile configuration dropdown options */}
-                  {false && showProfileDropdown && (
-                    <div className="absolute right-0 mt-3 z-40 w-56 p-2 rounded-2xl bg-neutral-950 border border-white/10 shadow-2xl flex flex-col gap-1 text-left animate-in fade-in slide-in-from-top-2 duration-200">
-                      <div className="px-3 py-3 rounded-lg bg-white/[0.02] border border-white/[0.02]">
-                        <p className="text-[10px] text-white/50 mb-1.5">联系开发者 / 意见反馈</p>
-                        <p className="text-[10px] text-white/50 lowercase mb-1.5">联系开发者 / 意见反馈</p>
                         <p className="text-xs text-white font-bold tracking-tight select-text selection:bg-brand-coral/30 cursor-text break-all">
                           yuzhaodai@gmail.com
                         </p>
@@ -828,9 +810,12 @@ export default function App() {
               <TinderSwipeDeck 
                 movies={swipeCandidateMovies}
                 resetKey={swipeDeckResetKey}
-                onDetails={handleOpenDetailModal} 
-                onAddToWatchlist={handleAddToWatchlist}
+                keyboardEnabled={activeDetailMovie === null}
+                onDetails={handleOpenDetailModal}
+                onAddToWatchlist={handleSwipeAddToWatchlist}
                 onDismiss={handleDismissSwipeMovie}
+                onUndo={handleUndoSwipe}
+                onNewRound={() => setSwipeRound((round) => round + 1)}
               />
             ) : activeTab === "Vibe" ? (
               <VibePrompt
@@ -840,14 +825,16 @@ export default function App() {
                 onDetails={handleOpenDetailModal}
               />
             ) : activeTab === "观看历史" ? (
-              <ListManagementView 
+              <ListManagementView
+                themeMode={themeMode}
                 title="观看与浏览历史" 
                 movies={watchHistoryMovies} 
                 onRemove={handleRemoveFromHistory} 
                 onDetails={handleOpenDetailModal} 
               />
             ) : activeTab === "待看清单" ? (
-              <ListManagementView 
+              <ListManagementView
+                themeMode={themeMode}
                 title="我的待看清单" 
                 movies={watchlist} 
                 onRemove={handleRemoveFromWatchlist} 
@@ -858,7 +845,6 @@ export default function App() {
                 {/* DYNAMIC FOCUS BILLBOARD CAROUSEL */}
                 <HeroSection
                   movie={currentFeatured}
-                  onPlay={handlePlayMovieTrailer}
                   onDetails={handleOpenDetailModal}
                   onNext={handleNextFeatured}
                   onPrev={handlePrevFeatured}
@@ -874,7 +860,6 @@ export default function App() {
               </>
             )}
 
-            <DataAttribution />
 
           </main>
 
@@ -882,21 +867,11 @@ export default function App() {
 
       </div>
 
-      {/* DETAILED CINEMATIC PLAYER SCREEN POPUP */}
-      <VideoPlayerModal
-        videoUrl={activeVideo?.url || ""}
-        title={activeVideo?.title || ""}
-        movieTitle={activeVideo?.movieTitle || ""}
-        isOpen={activeVideo !== null}
-        onClose={() => setActiveVideo(null)}
-      />
-
       {/* METADATA DETAILED HUD OVERLAY WINDOW */}
       <MovieDetailModal
         movie={activeDetailMovie}
         isOpen={activeDetailMovie !== null}
         onClose={() => setActiveDetailMovie(null)}
-        onPlayTrailer={handlePlayMovieTrailer}
         onChangeMovie={handleOpenDetailModal}
         similarMovies={activeSimilarMovies}
         onWatchPlatform={(movie) => trackMovieInteraction(movie)}
