@@ -2,19 +2,23 @@ import React from "react";
 import { ChevronLeft, ChevronRight, Tv } from "lucide-react";
 import { Movie } from "../types";
 import { hideBrokenImage } from "./imageFallback";
+import { getLanguageLabel } from "../api/movieService";
 
 interface HeroSectionProps {
   movie: Movie;
-  onPlay: (movie: Movie) => void;
+  /** @deprecated 预告片入口已移除，保留可选以兼容旧调用 */
+  onPlay?: (movie: Movie) => void;
   onDetails: (movie: Movie) => void;
   onNext: () => void;
   onPrev: () => void;
   isSwitching?: boolean;
+  currentIndex?: number;
+  total?: number;
 }
 
-export default function HeroSection({ movie, onDetails, onNext, onPrev, isSwitching = false }: HeroSectionProps) {
+export default function HeroSection({ movie, onDetails, onNext, onPrev, isSwitching = false, currentIndex, total = 0 }: HeroSectionProps) {
   return (
-    <div className="relative w-full aspect-auto h-[300px] md:h-[340px] lg:h-[380px] rounded-[32px] overflow-hidden group shadow-xl flex flex-col justify-between flex-shrink-0 p-6 md:p-8 xl:p-10">
+    <div className="relative w-full aspect-auto h-[300px] md:h-[340px] lg:h-[380px] fit:!h-[clamp(220px,44%,380px)] rounded-[32px] overflow-hidden group shadow-xl flex flex-col justify-between flex-shrink-0 p-6 md:p-8 xl:p-10">
       {/* Absolute Backdrop image */}
       <div className="absolute inset-0 bg-neutral-900 overflow-hidden">
         <img
@@ -47,7 +51,7 @@ export default function HeroSection({ movie, onDetails, onNext, onPrev, isSwitch
             </span>
           ))}
           <span className="px-2.5 py-1.5 rounded-full bg-white/5 backdrop-blur-md border border-white/10 text-brand-coral text-[10px] md:text-xs font-mono font-bold">
-            IMDb {movie.rating}
+            TMDB {movie.rating}
           </span>
           <span className="px-2.5 py-1.5 rounded-full bg-white/5 backdrop-blur-md border border-white/10 text-white/70 text-[10px] md:text-xs font-mono font-medium">
             {movie.maturityRating}
@@ -70,7 +74,7 @@ export default function HeroSection({ movie, onDetails, onNext, onPrev, isSwitch
             <span className="w-1 h-1 rounded-full bg-white/30 hidden sm:block"></span>
             <span className="whitespace-nowrap">{movie.duration}</span>
             <span className="w-1 h-1 rounded-full bg-white/30 hidden sm:block"></span>
-            <span className="capitalize whitespace-nowrap">{movie.language === "en" ? "英语原音" : (movie.language === "ja" ? "日语原音" : `${movie.language.toUpperCase()} 原音`)}</span>
+            <span className="capitalize whitespace-nowrap">{getLanguageLabel(movie.language)}原音</span>
           </p>
 
           {/* Synopsis text */}
@@ -91,7 +95,8 @@ export default function HeroSection({ movie, onDetails, onNext, onPrev, isSwitch
         </div>
 
         {/* Right Side: Navigation Controls */}
-        <div className="flex items-center gap-2 p-1.5 rounded-2xl bg-white/20 backdrop-blur-xl border border-white/40 shadow-lg shrink-0 mb-1 md:mb-2 mr-1 md:mr-2 opacity-0 group-hover:opacity-100 transition-all duration-300">
+        <div className="flex flex-col items-center gap-2 shrink-0 mb-1 md:mb-2 mr-1 md:mr-2">
+        <div className="flex items-center gap-2 p-1.5 rounded-2xl bg-white/20 backdrop-blur-xl border border-white/40 shadow-lg opacity-100 lg:opacity-0 lg:group-hover:opacity-100 lg:focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-all duration-300">
           <button
             onClick={onPrev}
             disabled={isSwitching}
@@ -99,6 +104,7 @@ export default function HeroSection({ movie, onDetails, onNext, onPrev, isSwitch
               isSwitching ? "cursor-wait opacity-60" : "cursor-pointer"
             }`}
             title="前一部焦点电影"
+            aria-label="前一部焦点电影"
           >
             <ChevronLeft size={20} className="stroke-[2.5]" />
           </button>
@@ -109,9 +115,27 @@ export default function HeroSection({ movie, onDetails, onNext, onPrev, isSwitch
               isSwitching ? "cursor-wait opacity-60" : "cursor-pointer"
             }`}
             title="下一部焦点电影"
+            aria-label="下一部焦点电影"
           >
             <ChevronRight size={20} className="stroke-[2.5]" />
           </button>
+        </div>
+        {typeof currentIndex === "number" && total > 1 && (
+          <div
+            className="flex items-center gap-1.5 px-2 py-1 rounded-full bg-neutral-950/30 backdrop-blur-md"
+            role="img"
+            aria-label={`第 ${currentIndex + 1} 部，共 ${total} 部`}
+          >
+            {Array.from({ length: total }).map((_, index) => (
+              <span
+                key={index}
+                className={`h-1.5 rounded-full transition-all duration-300 ${
+                  index === currentIndex ? "w-4 bg-brand-coral" : "w-1.5 bg-white/50"
+                }`}
+              />
+            ))}
+          </div>
+        )}
         </div>
       </div>
     </div>

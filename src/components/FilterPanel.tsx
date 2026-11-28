@@ -1,7 +1,7 @@
-import React from "react";
-import { Filter, Star, RefreshCw, Layers, Calendar, Disc3, SortAsc } from "lucide-react";
-import { GENRES, LANGUAGES } from "../data";
-import { FilterState } from "../types";
+import { Filter, Star, RefreshCw, Layers, Calendar, Disc3, SortAsc, Tv } from "lucide-react";
+import { GENRES } from "../data";
+import { FilterState, WatchPlatformType } from "../types";
+import { ALL_FILTER_VALUE, getLanguageLabel, normalizeGenreFilter } from "../api/movieService";
 
 interface FilterPanelProps {
   filters: FilterState;
@@ -23,14 +23,67 @@ const GENRE_CHINESE: Record<string, string> = {
   "Action": "动作"
 };
 
-const LANGUAGE_CHINESE: Record<string, string> = {
-  "All": "所有语言",
-  "en": "英语",
-  "ja": "日语",
-  "ko": "韩语",
-  "fr": "法语",
-  "de": "德语"
-};
+const LANGUAGE_OPTIONS = [ALL_FILTER_VALUE, "zh", "en", "ja", "ko", "es", "fr", "de"];
+
+const PLATFORM_OPTIONS: { type: WatchPlatformType; label: string }[] = [
+  { type: "theaters", label: "院线" },
+  { type: "netflix", label: "Netflix" },
+  { type: "prime", label: "Prime Video" },
+  { type: "apple", label: "Apple TV" },
+  { type: "disney", label: "Disney+" },
+  { type: "hbo", label: "HBO" },
+  { type: "paramount", label: "Paramount+" },
+  { type: "hulu", label: "Hulu" },
+  { type: "crunchyroll", label: "Crunchyroll" },
+];
+
+const DEFAULT_YEAR_RANGE: [number, number] = [1950, 2026];
+
+/** 统计与默认值不同的筛选项数量（不含搜索词），用于入口按钮上的标记 */
+export function countActiveFilters(filters: FilterState): number {
+  let count = 0;
+  if (normalizeGenreFilter(filters.selectedGenre) !== ALL_FILTER_VALUE) count += 1;
+  if (filters.yearRange[0] !== DEFAULT_YEAR_RANGE[0] || filters.yearRange[1] !== DEFAULT_YEAR_RANGE[1]) count += 1;
+  if (filters.minRating > 0) count += 1;
+  if (filters.language !== ALL_FILTER_VALUE) count += 1;
+  if (filters.selectedPlatform) count += 1;
+  if (filters.sortBy !== "popular") count += 1;
+  return count;
+}
+
+interface FilterToggleButtonProps {
+  isOpen: boolean;
+  onToggle: () => void;
+  activeCount?: number;
+  controlsId?: string;
+}
+
+/** 顶部工具区的筛选入口，尺寸与样式对齐日夜切换按钮 */
+export function FilterToggleButton({ isOpen, onToggle, activeCount = 0, controlsId = "filter-panel" }: FilterToggleButtonProps) {
+  const label = activeCount > 0 ? `筛选（已启用 ${activeCount} 项）` : "筛选";
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-expanded={isOpen}
+      aria-controls={controlsId}
+      aria-label={isOpen ? `收起${label}` : `打开${label}`}
+      title={label}
+      className={`relative h-11 w-11 rounded-xl border transition-all cursor-pointer active:scale-95 flex items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-coral ${
+        isOpen
+          ? "bg-white/[0.1] border-white/[0.18] text-white"
+          : "bg-white/[0.02] border-white/[0.06] hover:bg-white/[0.08] hover:border-white/[0.15] text-white/80 hover:text-white"
+      }`}
+    >
+      <Filter size={15} />
+      {activeCount > 0 && (
+        <span className="absolute -top-1 -right-1 min-w-4 h-4 px-1 rounded-full bg-brand-coral text-[9px] font-bold leading-4 text-neutral-950 text-center">
+          {activeCount}
+        </span>
+      )}
+    </button>
+  );
+}
 
 const SORT_CHINESE: Record<string, string> = {
   "popular": "最热门",
@@ -49,7 +102,7 @@ export default function FilterPanel({
   if (!isOpen) return null;
 
   return (
-    <div className="w-full">
+    <div className="w-full" id="filter-panel">
       {/* Advanced Filter Body */}
       <div className="glass-panel p-6 rounded-3xl animate-in fade-in slide-in-from-top-4 duration-300 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 relative overflow-hidden">
         {/* Subtle atmospheric glow inside pane */}
@@ -59,11 +112,11 @@ export default function FilterPanel({
         <div className="flex flex-col gap-3">
           <label className="text-white/50 text-[11px] uppercase font-bold tracking-wider flex items-center gap-1.5">
             <Layers size={12} className="text-brand-coral" />
-            电影流派筛选 / Genres
+            类型
           </label>
           <div className="flex flex-wrap gap-1.5 max-h-[140px] overflow-y-auto scrollbar-none">
             {GENRES.map((g) => {
-              const isSelected = filters.selectedGenre === g;
+              const isSelected = normalizeGenreFilter(filters.selectedGenre) === normalizeGenreFilter(g);
               return (
                 <button
                   key={g}
@@ -85,7 +138,7 @@ export default function FilterPanel({
         <div className="flex flex-col gap-3">
           <label className="text-white/50 text-[11px] uppercase font-bold tracking-wider flex items-center gap-1.5">
             <Calendar size={12} className="text-brand-coral" />
-            上映年份区间 / Year
+            上映年份
           </label>
           <div className="flex flex-col gap-2 bg-white/[0.02] border border-white/[0.04] p-3 rounded-2xl">
             <div className="flex items-center justify-between text-xs font-mono text-zinc-300">
@@ -95,7 +148,7 @@ export default function FilterPanel({
             </div>
             <input
               type="range"
-              min="2000"
+              min="1950"
               max="2026"
               value={filters.yearRange[1]}
               onChange={(e) =>
@@ -113,7 +166,7 @@ export default function FilterPanel({
         <div className="flex flex-col gap-3">
           <label className="text-white/50 text-[11px] uppercase font-bold tracking-wider flex items-center gap-1.5">
             <Star size={12} className="text-brand-coral" />
-            最低 IMDb 评分 / Rating
+            最低 TMDB 评分
           </label>
           <div className="flex flex-col gap-2.5 bg-white/[0.02] border border-white/[0.04] p-3 rounded-2xl">
             <div className="flex items-center justify-between">
@@ -154,16 +207,16 @@ export default function FilterPanel({
           <div>
             <label className="text-white/50 text-[11px] uppercase font-bold tracking-wider flex items-center gap-1.5 mb-2">
               <Disc3 size={11} className="text-brand-coral" />
-              原作语言 / Language
+              原作语言
             </label>
             <select
               value={filters.language}
               onChange={(e) => onChangeFilters({ language: e.target.value })}
               className="w-full px-3 py-2 bg-white/[0.03] hover:bg-white/[0.06] border border-white/[0.08] focus:border-brand-coral/40 rounded-xl text-white text-xs font-medium focus:outline-none transition-all cursor-pointer"
             >
-              {LANGUAGES.map((lang) => (
-                <option key={lang.code} value={lang.code} className="bg-neutral-900 text-white">
-                  {LANGUAGE_CHINESE[lang.code] || lang.name}
+              {LANGUAGE_OPTIONS.map((code) => (
+                <option key={code} value={code} className="bg-neutral-900 text-white">
+                  {code === ALL_FILTER_VALUE ? "所有语言" : getLanguageLabel(code)}
                 </option>
               ))}
             </select>
@@ -173,7 +226,7 @@ export default function FilterPanel({
           <div>
             <label className="text-white/50 text-[11px] uppercase font-bold tracking-wider flex items-center gap-1.5 mb-2">
               <SortAsc size={11} className="text-brand-coral" />
-              排序方式 / Sort
+              排序方式
             </label>
             <div className="grid grid-cols-3 gap-1 bg-white/[0.02] border border-white/[0.04] p-1 rounded-xl">
               {(["popular", "newest", "rating"] as const).map((method) => {
@@ -193,6 +246,26 @@ export default function FilterPanel({
                 );
               })}
             </div>
+          </div>
+
+          {/* Platform Selection */}
+          <div>
+            <label className="text-white/50 text-[11px] uppercase font-bold tracking-wider flex items-center gap-1.5 mb-2">
+              <Tv size={11} className="text-brand-coral" />
+              播放平台
+            </label>
+            <select
+              value={filters.selectedPlatform || ""}
+              onChange={(e) => onChangeFilters({ selectedPlatform: (e.target.value || null) as WatchPlatformType | null })}
+              className="w-full px-3 py-2 bg-white/[0.03] hover:bg-white/[0.06] border border-white/[0.08] focus:border-brand-coral/40 rounded-xl text-white text-xs font-medium focus:outline-none transition-all cursor-pointer"
+            >
+              <option value="" className="bg-neutral-900 text-white">所有平台</option>
+              {PLATFORM_OPTIONS.map((platform) => (
+                <option key={platform.type} value={platform.type} className="bg-neutral-900 text-white">
+                  {platform.label}
+                </option>
+              ))}
+            </select>
           </div>
 
           {/* Reset Filters Shortcut Button */}

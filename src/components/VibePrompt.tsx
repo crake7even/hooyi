@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowUp, CheckCircle2, Mic, Sparkles, Tv } from "lucide-react";
+import { ArrowUp, CheckCircle2, Sparkles, Tv } from "lucide-react";
 import { requestVibeRecommendation, VibeResponse } from "../api/vibeService";
 import { FilterState, Movie, WatchPlatform } from "../types";
 import { hideBrokenImage } from "./imageFallback";
@@ -123,7 +123,7 @@ export default function VibePrompt({ themeMode, movies, filters, onDetails }: Vi
           </div>
         ) : error ? (
           <div className="w-full max-w-2xl text-center rounded-[28px] border border-white/10 bg-white/[0.06] backdrop-blur-2xl px-6 py-8 shadow-2xl">
-            <p className="text-brand-coral text-xs font-mono font-bold uppercase mb-3">VIBE FAILED</p>
+            <p className="text-brand-coral text-xs font-mono font-bold uppercase mb-3">推荐失败</p>
             <p className="text-white/75 text-sm leading-relaxed">{error}</p>
           </div>
         ) : hasRecommendations ? (
@@ -303,17 +303,7 @@ export default function VibePrompt({ themeMode, movies, filters, onDetails }: Vi
           rows={1}
         />
 
-        <div className="flex justify-between items-center px-4 pt-2 pb-1">
-          <button
-            className={`p-2 rounded-full transition-colors ${
-              themeMode === "night" ? "hover:bg-white/10 text-white/60 hover:text-white" : "hover:bg-black/10 text-black/60 hover:text-black"
-            }`}
-            title="Use Voice"
-            type="button"
-          >
-            <Mic size={20} />
-          </button>
-
+        <div className="flex justify-end items-center px-4 pt-2 pb-1">
           <button
             onClick={() => {
               void submitVibe();

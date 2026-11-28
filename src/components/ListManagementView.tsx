@@ -8,9 +8,10 @@ interface ListManagementViewProps {
   movies: Movie[];
   onRemove: (ids: string[]) => void;
   onDetails: (movie: Movie) => void;
+  themeMode?: "night" | "day";
 }
 
-export default function ListManagementView({ title, movies, onRemove, onDetails }: ListManagementViewProps) {
+export default function ListManagementView({ title, movies, onRemove, onDetails, themeMode = "night" }: ListManagementViewProps) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -204,9 +205,15 @@ export default function ListManagementView({ title, movies, onRemove, onDetails 
           })}
         </div>
       ) : (
-        <div className="flex-1 flex flex-col items-center justify-center text-white/40 pb-20">
-          <Library size={48} className="mb-4 opacity-30" />
-          <p>列表空空如也，快去探索吧！</p>
+        <div className="flex-1 flex flex-col items-center justify-center pb-20">
+          <div
+            className={`flex flex-col items-center ${
+              themeMode === "day" ? "rounded-3xl bg-neutral-950/55 px-8 py-6 text-white/90" : "text-white/40"
+            }`}
+          >
+            <Library size={48} className={`mb-4 ${themeMode === "day" ? "opacity-70" : "opacity-30"}`} />
+            <p>列表空空如也，快去探索吧！</p>
+          </div>
         </div>
       )}
     </div>

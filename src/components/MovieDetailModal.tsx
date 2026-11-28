@@ -1,13 +1,15 @@
-import React from "react";
-import { X, Play, Heart, Star, Film, Sparkles, User, Calendar, Languages, Tv, ExternalLink } from "lucide-react";
+import { useEffect, useRef } from "react";
+import { X, Heart, Star, Film, Sparkles, User, Calendar, Languages, Tv, ExternalLink } from "lucide-react";
 import { Movie, WatchPlatform } from "../types";
 import { hideBrokenImage } from "./imageFallback";
+import { getLanguageLabel } from "../api/movieService";
 
 interface MovieDetailModalProps {
   movie: Movie | null;
   isOpen: boolean;
   onClose: () => void;
-  onPlayTrailer: (movie: Movie) => void;
+  /** @deprecated 预告片入口已移除，保留可选以兼容旧调用 */
+  onPlayTrailer?: (movie: Movie) => void;
   onChangeMovie: (movie: Movie) => void;
   similarMovies?: Movie[];
   onWatchPlatform?: (movie: Movie) => void;
@@ -28,20 +30,64 @@ export default function MovieDetailModal({
   movie,
   isOpen,
   onClose,
-  onPlayTrailer,
   onChangeMovie,
   similarMovies = [],
   onWatchPlatform,
 }: MovieDetailModalProps) {
+  const panelRef = useRef<HTMLDivElement>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  const isVisible = isOpen && movie !== null;
+
+  useEffect(() => {
+    if (!isVisible) return;
+
+    const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    panelRef.current?.focus({ preventScroll: true });
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        onCloseRef.current();
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown, true);
+
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown, true);
+      document.body.style.overflow = previousOverflow;
+      if (previouslyFocused?.isConnected) previouslyFocused.focus({ preventScroll: true });
+    };
+  }, [isVisible]);
+
+  useEffect(() => {
+    if (isVisible) panelRef.current?.scrollTo({ top: 0 });
+  }, [isVisible, movie?.id]);
+
   if (!isOpen || !movie) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-neutral-950/85 backdrop-blur-xl animate-fade-in text-left">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-neutral-950/85 backdrop-blur-xl animate-fade-in text-left"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
       {/* Visual background gradient projector */}
       <div className="absolute inset-0 bg-radial bg-gradient-to-tr from-brand-bronze-dark/50 via-transparent to-transparent pointer-events-none"></div>
 
       {/* Main Glass Panel Card */}
-      <div className="relative w-full max-w-3xl rounded-[32px] overflow-hidden shadow-2xl z-10 flex flex-col scale-in max-h-[90vh] overflow-y-auto cinema-scrollbar border border-white/10 bg-neutral-950/92 backdrop-blur-2xl">
+      <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={`《${movie.title}》详情`}
+        tabIndex={-1}
+        className="relative w-full max-w-3xl rounded-[32px] focus:outline-none overflow-hidden shadow-2xl z-10 flex flex-col scale-in max-h-[90vh] overflow-y-auto cinema-scrollbar border border-white/10 bg-neutral-950/92 backdrop-blur-2xl"
+      >
         
         {/* Unified ambient backdrop */}
         <div className="absolute inset-0 bg-neutral-950 pointer-events-none overflow-hidden z-0">
@@ -59,6 +105,8 @@ export default function MovieDetailModal({
         {/* Absolute Exit button */}
         <button
           onClick={onClose}
+          aria-label="关闭详情"
+          title="关闭（Esc）"
           className="absolute top-5 right-5 p-2 rounded-xl bg-white/5 border border-white/10 hover:border-white/20 text-white/55 hover:text-white transition-colors cursor-pointer z-20"
         >
           <X size={15} />
@@ -78,26 +126,17 @@ export default function MovieDetailModal({
                 onError={hideBrokenImage}
                 className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700"
               />
-              <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end justify-center p-4">
-                <button
-                  onClick={() => onPlayTrailer(movie)}
-                  className="px-4 py-2 rounded-full bg-brand-coral text-neutral-950 text-xs font-bold flex items-center gap-1.5 shadow-lg"
-                >
-                  <Play size={10} className="fill-neutral-950 text-neutral-950" />
-                  Watch Trailer / 预告片
-                </button>
-              </div>
             </div>
             
             {/* Meta status values */}
             <div className="flex flex-col gap-2 mt-4">
               <div className="flex items-center gap-2 justify-between bg-white/[0.02] border border-white/[0.04] p-3 rounded-xl font-mono text-[11px] text-white/60">
-                <span className="flex items-center gap-1"><Heart size={12} className="text-brand-coral fill-brand-coral/20" /> Likes</span>
+                <span className="flex items-center gap-1"><Heart size={12} className="text-brand-coral fill-brand-coral/20" /> 热度</span>
                 <span className="text-white font-bold">{movie.likesCount}</span>
               </div>
               <div className="flex items-center gap-2 justify-between bg-white/[0.02] border border-white/[0.04] p-3 rounded-xl font-mono text-[11px] text-white/60">
-                <span className="flex items-center gap-0.5"><Languages size={12} className="text-zinc-400" /> Audio</span>
-                <span className="text-white font-bold uppercase">{movie.language}</span>
+                <span className="flex items-center gap-0.5"><Languages size={12} className="text-zinc-400" /> 原声语言</span>
+                <span className="text-white font-bold">{getLanguageLabel(movie.language)}</span>
               </div>
             </div>
           </div>
@@ -109,7 +148,7 @@ export default function MovieDetailModal({
               <div className="flex items-center gap-3 mb-1.5 text-xs font-mono font-semibold">
                 <span className="text-brand-coral flex items-center gap-1">
                   <Star size={12} className="fill-brand-coral" />
-                  IMDb {movie.rating.toFixed(1)}
+                  TMDB {movie.rating.toFixed(1)}
                 </span>
                 <span className="text-white/40">•</span>
                 <span className="text-white/60">{movie.year}</span>
@@ -272,16 +311,6 @@ export default function MovieDetailModal({
               )}
             </div>
 
-            {/* Direct Play button row */}
-            <div className="flex justify-end gap-3 pt-3 mt-auto">
-              <button
-                onClick={() => onPlayTrailer(movie)}
-                className="flex items-center gap-2 px-6 py-2.5 rounded-full bg-brand-coral hover:bg-brand-coral/90 text-neutral-950 text-xs font-bold transition-all shadow-lg shadow-brand-coral/10 hover:shadow-brand-coral/30 cursor-pointer"
-              >
-                <Play size={12} className="fill-neutral-950 text-neutral-950" />
-                观看预告片
-              </button>
-            </div>
 
           </div>
 

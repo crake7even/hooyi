@@ -20,7 +20,7 @@ export interface Movie {
   title: string;
   year: number;
   genres: string[];
-  rating: number; // IMDb rating, e.g. 8.9
+  rating: number; // TMDB vote_average, e.g. 8.9
   duration: string; // e.g., "2h 20m"
   director: string;
   cast: string[];
@@ -57,7 +57,7 @@ export interface FilterState {
   searchQuery: string;
   selectedGenre: string; // "All" or a specific genre
   yearRange: [number, number]; // [minYear, maxYear]
-  minRating: number; // Minimum IMDb rating
+  minRating: number; // Minimum TMDB rating
   language: string; // "All" or language code
   sortBy: "popular" | "newest" | "rating";
   selectedPlatform?: WatchPlatformType | null; // Selected streaming platform identifier
